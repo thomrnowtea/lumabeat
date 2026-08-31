@@ -8,4 +8,5 @@ captures/
 .cxx/
 app/build/
 .release/
+scripts/
 *.log

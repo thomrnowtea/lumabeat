@@ -39,18 +39,6 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Emulator and real WiZ lights
-
-An Android emulator cannot directly receive LAN broadcast responses. Start the restricted host bridge in a separate PowerShell window:
-
-```powershell
-./scripts/wiz-host-bridge.ps1
-```
-
-Then build, install, and launch the app. The emulator automatically routes discovery and allow-listed WiZ commands through `10.0.2.2:38900`.
-
-The bridge accepts commands only for lights it discovered itself. It must remain running during emulator-to-LAN tests.
-
 ## How artwork colors work
 
 When enabled, LumaBeat asks Android for notification-listener access. It reads artwork already exposed by active media sessions, samples the image locally, rejects dark and neutral pixels, and selects three distinct dominant colors. The next eligible beat advances through that palette every few seconds, so color traffic does not add latency to the brightness pulse stream.
