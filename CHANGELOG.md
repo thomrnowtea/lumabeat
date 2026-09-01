@@ -4,6 +4,15 @@ All notable changes to LumaBeat are documented here.
 
 ## Unreleased
 
+## 0.1.2 - 2026-09-01
+
+- Replace OEM-dependent global-output visualization with Android's supported playback-capture API and explicit system consent.
+- Capture only playback streams that the source application allows Android to share; protected or opted-out audio remains unavailable.
+- Publish a Core APK without notification-listener access so Play Protect enhanced fraud protection does not block the direct download for that sensitive capability.
+- Keep the artwork-color implementation in a separate, unpublished Full build variant.
+- Add release checks that reject any Core APK whose merged manifest accidentally restores notification-listener access.
+- Raise the minimum supported version to Android 10, where playback capture became available.
+
 ## 0.1.1 - 2026-09-01
 
 - Reduce beat latency with near-continuous audio windows, non-blocking brightness dispatch, and a reusable WiZ UDP socket.

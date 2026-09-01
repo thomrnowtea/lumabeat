@@ -1,15 +1,26 @@
 package com.lumabeat.app.audio
 
+import android.app.Activity
 import android.annotation.SuppressLint
-import android.media.audiofx.Visualizer
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.AudioRecord
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.sqrt
 
 data class AudioLevel(
     val normalized: Float,
@@ -17,73 +28,109 @@ data class AudioLevel(
     val isBeat: Boolean = false,
     val signalPresent: Boolean = true,
     val inputRms: Float = 0f,
-    val captureSource: String = "output_mix",
+    val captureSource: String = "playback_capture",
 )
 
-class AudioLevelAnalyzer {
+class AudioLevelAnalyzer(private val context: Context) {
     @SuppressLint("MissingPermission")
-    fun levels(presetProvider: () -> BeatPreset): Flow<AudioLevel> = flow {
-        val visualizer = Visualizer(OUTPUT_MIX_AUDIO_SESSION).apply {
-            captureSize = Visualizer.getCaptureSizeRange().last()
-            scalingMode = Visualizer.SCALING_MODE_AS_PLAYED
-            enabled = true
+    fun levels(
+        projectionResultCode: Int,
+        projectionData: Intent,
+        presetProvider: () -> BeatPreset,
+    ): Flow<AudioLevel> = flow {
+        check(projectionResultCode == Activity.RESULT_OK) {
+            "System audio sharing was not approved."
         }
-        val waveform = ByteArray(visualizer.captureSize)
-        val samples = ShortArray(visualizer.captureSize)
-        val detector = PercussionDetector(presetProvider)
+        val projectionManager = context.getSystemService(MediaProjectionManager::class.java)
+        val projection = requireNotNull(
+            projectionManager.getMediaProjection(projectionResultCode, projectionData),
+        ) { "Android did not provide playback audio capture access." }
+        val projectionActive = AtomicBoolean(true)
+        var recorder: AudioRecord? = null
+        val projectionCallback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                projectionActive.set(false)
+                runCatching { recorder?.stop() }
+            }
+        }
         try {
-            while (currentCoroutineContext().isActive) {
-                val status = visualizer.getWaveForm(waveform)
-                check(status == Visualizer.SUCCESS) {
-                    "Android did not allow access to the system audio mix."
+            projection.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
+            val captureConfiguration = AudioPlaybackCaptureConfiguration.Builder(projection)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+            val minimumBufferBytes = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+            )
+            check(minimumBufferBytes > 0) { "Android could not allocate an audio capture buffer." }
+            val audioRecord = AudioRecord.Builder()
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(SAMPLE_RATE)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                        .build(),
+                )
+                .setBufferSizeInBytes(maxOf(minimumBufferBytes, CAPTURE_SAMPLES * Short.SIZE_BYTES))
+                .setAudioPlaybackCaptureConfig(captureConfiguration)
+                .build()
+            recorder = audioRecord
+            check(audioRecord.state == AudioRecord.STATE_INITIALIZED) {
+                "Android did not initialize playback audio capture."
+            }
+
+            val samples = ShortArray(CAPTURE_SAMPLES)
+            val detector = PercussionDetector(presetProvider)
+            audioRecord.startRecording()
+            check(audioRecord.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                "Android did not start playback audio capture."
+            }
+            while (currentCoroutineContext().isActive && projectionActive.get()) {
+                val sampleCount = audioRecord.read(
+                    samples,
+                    0,
+                    samples.size,
+                    AudioRecord.READ_BLOCKING,
+                )
+                check(sampleCount >= 0) {
+                    "Playback audio capture stopped with status $sampleCount."
                 }
-                convertWaveform(waveform, samples)
-                val inputRms = calculateRms(samples)
-                val detectedLevel = detector.analyze(samples, samples.size)
+                if (sampleCount == 0) continue
+                val inputRms = calculateRms(samples, sampleCount)
+                val detectedLevel = detector.analyze(samples, sampleCount)
+                val signalPresent = inputRms >= SIGNAL_THRESHOLD_RMS
                 emit(
                     detectedLevel.copy(
-                        normalized = if (inputRms >= SIGNAL_THRESHOLD_RMS) {
-                            detectedLevel.normalized
-                        } else {
-                            0f
-                        },
-                        isBeat = detectedLevel.isBeat && inputRms >= SIGNAL_THRESHOLD_RMS,
-                        signalPresent = inputRms >= SIGNAL_THRESHOLD_RMS,
+                        normalized = if (signalPresent) detectedLevel.normalized else 0f,
+                        isBeat = detectedLevel.isBeat && signalPresent,
+                        signalPresent = signalPresent,
                         inputRms = inputRms,
                     ),
                 )
-                delay(ANALYSIS_INTERVAL_MS)
             }
         } finally {
-            runCatching { visualizer.enabled = false }
-            visualizer.release()
+            runCatching { recorder?.stop() }
+            recorder?.release()
+            runCatching { projection.unregisterCallback(projectionCallback) }
+            runCatching { projection.stop() }
         }
-    }.flowOn(Dispatchers.Default).conflate()
+    }.flowOn(Dispatchers.IO).conflate()
 
-    private fun convertWaveform(waveform: ByteArray, samples: ShortArray) {
-        waveform.indices.forEach { index ->
-            val centeredSample = (waveform[index].toInt() and 0xFF) - UNSIGNED_BYTE_CENTER
-            samples[index] = (centeredSample shl BYTE_TO_SHORT_SHIFT).toShort()
-        }
-    }
-
-    private fun calculateRms(samples: ShortArray): Float {
+    private fun calculateRms(samples: ShortArray, sampleCount: Int): Float {
         var sumSquares = 0.0
-        samples.forEach { sample ->
-            val normalized = sample / Short.MAX_VALUE.toDouble()
+        repeat(sampleCount) { index ->
+            val normalized = samples[index] / Short.MAX_VALUE.toDouble()
             sumSquares += normalized * normalized
         }
-        return kotlin.math.sqrt(sumSquares / samples.size).toFloat()
+        return sqrt(sumSquares / sampleCount).toFloat()
     }
 
     private companion object {
-        // A 50 ms poll can entirely miss the short attack of a kick or snare. The
-        // captured window is about 23 ms at 44.1 kHz, so polling every 20 ms keeps
-        // adjacent windows effectively continuous without increasing FFT size.
-        const val ANALYSIS_INTERVAL_MS = 20L
+        const val SAMPLE_RATE = 44_100
+        const val CAPTURE_SAMPLES = 1_024
         const val SIGNAL_THRESHOLD_RMS = 0.001f
-        const val OUTPUT_MIX_AUDIO_SESSION = 0
-        const val UNSIGNED_BYTE_CENTER = 128
-        const val BYTE_TO_SHORT_SHIFT = 8
     }
 }

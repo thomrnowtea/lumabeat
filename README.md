@@ -8,7 +8,7 @@
   Music-reactive WiZ lighting for Android and Android TV.
 </p>
 
-LumaBeat listens to the device output mix, detects percussion with low latency, and turns each hit into a local WiZ brightness pulse. It runs without a WiZ account or cloud connection and is designed to stay open on an Android TV.
+LumaBeat listens to playback audio that Android explicitly shares, detects percussion with low latency, and turns each hit into a local WiZ brightness pulse. It runs without a WiZ account or cloud connection and is designed to stay open on an Android TV.
 
 ## Features
 
@@ -16,17 +16,15 @@ LumaBeat listens to the device output mix, detects percussion with low latency, 
 - Sends low-latency brightness pulses without changing white temperature by default.
 - Offers Soft, Punchy, and Intense percussion profiles.
 - Lets each powered-on light opt in or out of dynamic changes. Powered-off lights remain visible but unavailable and automatically resume their saved participation state when switched on.
-- Uses a logo-derived dark neon design system, a scroll-free 16:9 Android TV dashboard, high-contrast D-pad focus, direct artwork controls, and native internal settings pages.
+- Uses a logo-derived dark neon design system, a scroll-free 16:9 Android TV dashboard, high-contrast D-pad focus, and native internal settings pages.
 - Provides a Black screen action while tracking. It keeps audio analysis and the foreground service running, lowers the application window brightness, hides system bars, and returns on any key press or tap.
-- Optionally reads active media artwork through Android notification access, extracts up to three distinct dominant colors locally, displays the live palette, and blends smoothly between them while beat tracking remains active.
 - Checks verified GitHub Releases, downloads with Android `DownloadManager`, and validates the SHA-256 digest, package identity, version, and signing certificate before opening the system installer.
 
 ## Requirements
 
-- Android 8.0 or newer.
+- Android 10 or newer.
 - WiZ lights and the Android device on the same local network.
-- Audio recording permission for output-mix analysis.
-- Optional notification access for album-art colors.
+- Audio recording permission and approval of Android's playback-capture prompt when tracking starts.
 - Optional per-app install permission for in-app updates.
 
 ## Build
@@ -35,18 +33,32 @@ Open the project in Android Studio or run:
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
-./gradlew.bat testDebugUnitTest lintDebug assembleDebug
+./gradlew.bat testCoreDebugUnitTest lintCoreDebug assembleCoreDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+The debug APK is written to `app/build/outputs/apk/core/debug/app-core-debug.apk`.
 
-## How artwork colors work
+## Audio capture and app compatibility
 
-When enabled from the main dashboard, LumaBeat asks Android for notification-listener access. It reads artwork already exposed by active media sessions, samples the image locally, and selects up to three genuinely distinct dominant colors. Diversity is measured by hue as well as RGB distance, so light and dark variants from the same color family do not occupy separate palette slots. White is eligible; black and gray pixels are ignored because they would duplicate dimming. Fully black or grayscale artwork falls back to neutral white.
+LumaBeat uses Android's supported Audio Playback Capture API. Starting beat tracking opens a system-owned consent dialog; LumaBeat cannot approve or bypass it. On recent Android versions, Android may require fresh approval for every new tracking session, including an automatic start.
+
+Capture is limited to audio usages intended for media or games, and the source application remains in control. Apps can allow capture, restrict it, or opt out entirely. Protected playback may therefore produce no signal even when it is audible. LumaBeat does not extract, decrypt, store, or upload audio.
+
+This is the practical per-app boundary: LumaBeat reacts only to streams Android permits in the approved capture session, not indiscriminately to microphones, calls, alarms, or private app audio.
+
+## Distribution editions
+
+GitHub Releases publish the **Core** edition. Its APK does not declare a notification-listener service, avoiding the sensitive notification-access capability that Play Protect enhanced fraud protection blocks for some direct internet installs.
+
+The source tree also contains an experimental **Full** flavor with album-art color extraction. It is intentionally not distributed as a GitHub APK. That capability should be distributed through a verified store path or reviewed separately before public use.
+
+## Experimental artwork colors (Full source flavor)
+
+The Full source flavor asks Android for notification-listener access. It reads artwork already exposed by active media sessions, samples the image locally, and selects up to three genuinely distinct dominant colors. Diversity is measured by hue as well as RGB distance, so light and dark variants from the same color family do not occupy separate palette slots. White is eligible; black and gray pixels are ignored because they would duplicate dimming. Fully black or grayscale artwork falls back to neutral white.
 
 The live palette is shown on the dashboard with its RGB hex values. Natural intensity preserves the sampled artwork colors, while Vivid and Bold increase saturation without increasing their peak RGB channel. A low-frequency color loop continuously blends through the resulting palette and across track changes while the percussion detector controls only brightness.
 
-No protected audio is extracted, stored, or decrypted. Artwork availability depends on what each media app publishes through Android's media session.
+Artwork availability depends on what each media app publishes through Android's media session.
 
 ## Black screen mode
 
@@ -54,7 +66,7 @@ Black screen mode renders black pixels and requests the minimum application-wind
 
 Android does not expose a portable application API for switching off an LCD television's physical panel backlight while leaving playback and application processing active. On OLED displays, black pixels normally emit no light. On LCD televisions, the panel may still keep its backlight on at a firmware-defined level even though the image is black. Vendor-specific "picture off" or "audio only" controls are outside LumaBeat's current cross-device scope.
 
-### Android TV firmware without Notification Access settings
+### Full flavor on Android TV firmware without Notification Access settings
 
 Some vendor firmware, including certain TCL Android TV 11 builds, omits the system screen used to grant notification-listener access. With ADB already connected to the TV, grant the standard listener access directly:
 
@@ -68,7 +80,7 @@ If the vendor also blocks background service binding, allow its auto-start AppOp
 adb shell cmd appops set com.lumabeat.app APP_AUTO_START allow
 ```
 
-These commands grant only the capabilities needed to observe active media artwork. They do not bypass DRM or grant access to protected audio content.
+These commands apply only to a locally built Full flavor and grant only the capability needed to observe active media artwork. They do not bypass DRM or grant access to protected audio content.
 
 ## Updates
 
@@ -84,7 +96,7 @@ Download the latest stable build from [GitHub Releases](https://github.com/thomr
 
 ## Privacy
 
-Audio analysis stays on the device. LumaBeat communicates with WiZ lights over the LAN and contacts GitHub only to check or download application updates. Notification access is optional and is used only to read active media artwork for color extraction.
+Audio analysis stays on the device. LumaBeat communicates with WiZ lights over the LAN and contacts GitHub only to check or download application updates. The public Core APK does not request notification access.
 
 ## Hardware longevity
 

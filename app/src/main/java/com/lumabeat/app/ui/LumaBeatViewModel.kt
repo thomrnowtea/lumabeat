@@ -62,7 +62,7 @@ data class LumaBeatUiState(
 
 class LumaBeatViewModel(application: Application) : AndroidViewModel(application) {
     private val controller = WizLanController(application)
-    private val audioLevelAnalyzer = AudioLevelAnalyzer()
+    private val audioLevelAnalyzer = AudioLevelAnalyzer(application)
     private val releaseRepository = GitHubReleaseRepository("LumaBeat/${BuildConfig.VERSION_NAME}")
     private val updateInstaller = AppUpdateInstaller(application)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
@@ -85,9 +85,10 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
             currentBrightness = initialPreset.baselineBrightness,
             autoStartEnabled = preferences.getBoolean(AUTO_START_KEY, false),
             keepScreenOnEnabled = preferences.getBoolean(KEEP_SCREEN_ON_KEY, true),
-            mediaColorsEnabled = preferences.getBoolean(MEDIA_COLORS_KEY, false),
+            mediaColorsEnabled = BuildConfig.ARTWORK_COLORS_AVAILABLE &&
+                preferences.getBoolean(MEDIA_COLORS_KEY, false),
             artworkColorIntensity = initialArtworkColorIntensity,
-            notificationAccessGranted = hasNotificationAccess(),
+            notificationAccessGranted = BuildConfig.ARTWORK_COLORS_AVAILABLE && hasNotificationAccess(),
             automaticUpdateChecks = preferences.getBoolean(AUTOMATIC_UPDATES_KEY, true),
         ),
     )
@@ -180,6 +181,13 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setMediaColorsEnabled(enabled: Boolean) {
+        if (!BuildConfig.ARTWORK_COLORS_AVAILABLE) {
+            preferences.edit().putBoolean(MEDIA_COLORS_KEY, false).apply()
+            mutableState.update {
+                it.copy(mediaColorsEnabled = false, notificationAccessGranted = false)
+            }
+            return
+        }
         preferences.edit().putBoolean(MEDIA_COLORS_KEY, enabled).apply()
         mutableState.update {
             it.copy(
@@ -210,6 +218,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openNotificationAccessSettings() {
+        if (!BuildConfig.ARTWORK_COLORS_AVAILABLE) return
         val application = getApplication<Application>()
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -226,7 +235,12 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refreshNotificationAccess() {
-        mutableState.update { it.copy(notificationAccessGranted = hasNotificationAccess()) }
+        mutableState.update {
+            it.copy(
+                notificationAccessGranted = BuildConfig.ARTWORK_COLORS_AVAILABLE &&
+                    hasNotificationAccess(),
+            )
+        }
     }
 
     fun setAutomaticUpdateChecks(enabled: Boolean) {
@@ -235,7 +249,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         if (enabled) checkForUpdates(manual = false)
     }
 
-    fun startAudioReactiveBrightness() {
+    fun startAudioReactiveBrightness(projectionResultCode: Int, projectionData: Intent) {
         if (participatingLights().isEmpty()) {
             mutableState.update { it.copy(message = "Select at least one light for the effect.") }
             return
@@ -248,7 +262,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 isAudioReactive = true,
                 signalPresent = false,
                 audioLevel = 0f,
-                message = "Preparing the system audio mix…",
+                message = "Preparing shared playback audio...",
             )
         }
         PlaybackCaptureService.start(application)
@@ -256,10 +270,10 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
             try {
                 PlaybackCaptureService.awaitForeground()
                 mutableState.update {
-                    it.copy(message = "Listening to the device audio output.")
+                    it.copy(message = "Listening to shared playback audio.")
                 }
-                startMediaColorGradient()
-                collectAudioLevels()
+                if (BuildConfig.ARTWORK_COLORS_AVAILABLE) startMediaColorGradient()
+                collectAudioLevels(projectionResultCode, projectionData)
             } finally {
                 stopMediaColorGradient()
                 PlaybackCaptureService.stop(application)
@@ -285,6 +299,12 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     fun audioPermissionDenied() {
         mutableState.update {
             it.copy(message = "Audio permission is required to detect percussion.")
+        }
+    }
+
+    fun audioCapturePermissionDenied() {
+        mutableState.update {
+            it.copy(message = "System audio sharing is required to detect percussion.")
         }
     }
 
@@ -429,10 +449,10 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
     }
 
-    private suspend fun collectAudioLevels() {
+    private suspend fun collectAudioLevels(projectionResultCode: Int, projectionData: Intent) {
         var lastBeatMillis = 0L
         var releaseSent = true
-        audioLevelAnalyzer.levels { state.value.beatPreset }
+        audioLevelAnalyzer.levels(projectionResultCode, projectionData) { state.value.beatPreset }
             .catch { error -> showAudioError(error) }
             .collect { level ->
                 mutableState.update {
@@ -568,9 +588,12 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         colorGradientJob = null
     }
 
-    private fun hasNotificationAccess(): Boolean = NotificationManagerCompat
-        .getEnabledListenerPackages(getApplication())
-        .contains(getApplication<Application>().packageName)
+    private fun hasNotificationAccess(): Boolean {
+        if (!BuildConfig.ARTWORK_COLORS_AVAILABLE) return false
+        return NotificationManagerCompat
+            .getEnabledListenerPackages(getApplication())
+            .contains(getApplication<Application>().packageName)
+    }
 
     private fun WizLight.stableKey(): String = macAddress.ifBlank { ipAddress }
 

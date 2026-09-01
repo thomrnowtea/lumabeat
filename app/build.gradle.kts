@@ -8,12 +8,14 @@ android {
     namespace = "com.lumabeat.app"
     compileSdk = 36
 
+    flavorDimensions += "distribution"
+
     defaultConfig {
         applicationId = "com.lumabeat.app"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 36
-        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 1
-        versionName = providers.environmentVariable("VERSION_NAME").orNull ?: "0.1.0"
+        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 4
+        versionName = providers.environmentVariable("VERSION_NAME").orNull ?: "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -26,6 +28,17 @@ android {
             storePassword = providers.environmentVariable("RELEASE_STORE_PASSWORD").orNull
             keyAlias = providers.environmentVariable("RELEASE_KEY_ALIAS").orNull
             keyPassword = providers.environmentVariable("RELEASE_KEY_PASSWORD").orNull
+        }
+    }
+
+    productFlavors {
+        create("core") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ARTWORK_COLORS_AVAILABLE", "false")
+        }
+        create("full") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ARTWORK_COLORS_AVAILABLE", "true")
         }
     }
 

@@ -46,18 +46,24 @@ jobs:
           echo "RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
           echo "RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
       - name: Verify and build signed release
-        run: ./gradlew testDebugUnitTest lintDebug assembleRelease
+        run: ./gradlew testCoreDebugUnitTest lintCoreDebug assembleCoreRelease compileFullDebugKotlin
       - name: Verify signature and prepare assets
         shell: bash
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          CORE_MANIFEST="$(find app/build/intermediates/merged_manifests/coreRelease -name AndroidManifest.xml | head -1)"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk LumaBeat.apk
+          test -f "$CORE_MANIFEST"
+          if grep -qE 'BIND_NOTIFICATION_LISTENER_SERVICE|MediaNotificationListenerService' "$CORE_MANIFEST"; then
+            echo "Core release unexpectedly contains notification-listener access."
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose app/build/outputs/apk/core/release/app-core-release.apk
+          cp app/build/outputs/apk/core/release/app-core-release.apk LumaBeat.apk
           APK_SHA256="$(sha256sum LumaBeat.apk | awk '{print $1}')"
           printf '%s  LumaBeat.apk\n' "$APK_SHA256" > LumaBeat.apk.sha256
-          printf '{"schemaVersion":1,"version":"%s","versionCode":%s,"tag":"%s","packageName":"com.lumabeat.app","apk":"https://github.com/thomrnowtea/lumabeat/releases/download/%s/LumaBeat.apk","sha256":"%s"}\n' \
+          printf '{"schemaVersion":1,"edition":"core","version":"%s","versionCode":%s,"tag":"%s","packageName":"com.lumabeat.app","apk":"https://github.com/thomrnowtea/lumabeat/releases/download/%s/LumaBeat.apk","sha256":"%s"}\n' \
             "$VERSION_NAME" "$VERSION_CODE" "$GITHUB_REF_NAME" "$GITHUB_REF_NAME" "$APK_SHA256" > release.json
       - name: Create GitHub release
         env:

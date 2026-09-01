@@ -3,6 +3,7 @@ package com.lumabeat.app.ui
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -118,11 +119,37 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     val activity = context as? Activity
     var autoStartHandled by rememberSaveable { mutableStateOf(false) }
     var blackoutEnabled by rememberSaveable { mutableStateOf(false) }
+    val mediaProjectionManager = remember(context) {
+        context.getSystemService(MediaProjectionManager::class.java)
+    }
+    val playbackCapturePermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val projectionData = result.data
+        if (result.resultCode == Activity.RESULT_OK && projectionData != null) {
+            viewModel.startAudioReactiveBrightness(result.resultCode, projectionData)
+        } else {
+            viewModel.audioCapturePermissionDenied()
+        }
+    }
+    val requestPlaybackCapture = {
+        playbackCapturePermission.launch(mediaProjectionManager.createScreenCaptureIntent())
+    }
     val audioPermission = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) viewModel.startAudioReactiveBrightness()
+        if (granted) requestPlaybackCapture()
         else viewModel.audioPermissionDenied()
+    }
+    val requestAudioCapture = {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPlaybackCapture()
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -142,14 +169,7 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
             autoStartHandled = false
         } else if (!autoStartHandled && !state.isDiscovering && state.lights.isNotEmpty()) {
             autoStartHandled = true
-            if (
-                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-            ) {
-                viewModel.startAudioReactiveBrightness()
-            } else {
-                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-            }
+            requestAudioCapture()
         }
     }
 
@@ -167,9 +187,7 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     val toggleListening = {
         when {
             state.isAudioReactive -> viewModel.stopAudioReactiveBrightness()
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED -> viewModel.startAudioReactiveBrightness()
-            else -> audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            else -> requestAudioCapture()
         }
     }
     LumaBeatTheme {
@@ -396,13 +414,15 @@ private fun TvDashboard(
                     onLightIncludedChange = onLightIncludedChange,
                     modifier = Modifier.weight(1f),
                 )
-                ArtworkColorsPanel(
-                    state = state,
-                    compact = true,
-                    onEnabledChange = onMediaColorsChange,
-                    onIntensityChange = onArtworkColorIntensityChange,
-                    onOpenNotificationAccess = onOpenNotificationAccess,
-                )
+                if (BuildConfig.ARTWORK_COLORS_AVAILABLE) {
+                    ArtworkColorsPanel(
+                        state = state,
+                        compact = true,
+                        onEnabledChange = onMediaColorsChange,
+                        onIntensityChange = onArtworkColorIntensityChange,
+                        onOpenNotificationAccess = onOpenNotificationAccess,
+                    )
+                }
             }
         }
     }
@@ -442,13 +462,15 @@ private fun PhoneDashboard(
             onEnterBlackout = onEnterBlackout,
         )
         PresetPanel(state.beatPreset, compact = false, onPresetSelected)
-        ArtworkColorsPanel(
-            state = state,
-            compact = false,
-            onEnabledChange = onMediaColorsChange,
-            onIntensityChange = onArtworkColorIntensityChange,
-            onOpenNotificationAccess = onOpenNotificationAccess,
-        )
+        if (BuildConfig.ARTWORK_COLORS_AVAILABLE) {
+            ArtworkColorsPanel(
+                state = state,
+                compact = false,
+                onEnabledChange = onMediaColorsChange,
+                onIntensityChange = onArtworkColorIntensityChange,
+                onOpenNotificationAccess = onOpenNotificationAccess,
+            )
+        }
         LightsPanel(
             state = state,
             compact = false,
@@ -1372,12 +1394,12 @@ private fun GeneralSettingsCard(
                     ) {
                         Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
-                        Text("Device output mix", color = TextSecondary, fontSize = 11.sp)
+                        Text("Shared playback audio", color = TextSecondary, fontSize = 11.sp)
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                        Text("Device output mix", color = TextSecondary, fontSize = 12.sp)
+                        Text("Shared playback audio", color = TextSecondary, fontSize = 12.sp)
                     }
                 }
             }

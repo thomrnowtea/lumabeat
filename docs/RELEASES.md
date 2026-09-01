@@ -7,12 +7,14 @@ Every push to `main` and every pull request runs unit tests, Android lint, and d
 ## Create a release
 
 1. Update `CHANGELOG.md` and the fallback version in `app/build.gradle.kts`.
-2. Run `./gradlew.bat testDebugUnitTest lintDebug assembleDebug` locally.
+2. Run `./gradlew.bat testCoreDebugUnitTest lintCoreDebug assembleCoreDebug compileFullDebugKotlin` locally.
 3. Push the release commit to `main`.
 4. Create and push an annotated semantic tag such as `v0.2.0`.
-5. GitHub Actions builds and verifies the signed APK and creates the GitHub Release.
+5. GitHub Actions builds and verifies the signed Core APK, asserts that it contains no notification-listener declaration, and creates the GitHub Release.
 
 Each release publishes `LumaBeat.apk`, `LumaBeat.apk.sha256`, and schema-v1 `release.json`.
+
+The public APK is the `core` distribution. It uses Android's explicit playback-capture consent and deliberately omits notification-listener access so direct installs are not classified as sensitive notification-access sideloads. The `full` source variant retains the experimental artwork-color integration but is not published as a GitHub APK.
 
 ## Signing
 
