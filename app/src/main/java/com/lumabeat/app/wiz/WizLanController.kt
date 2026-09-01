@@ -51,7 +51,6 @@ class WizLanController(context: Context) {
     suspend fun setColor(
         lights: List<WizLight>,
         color: LightColor,
-        brightnessPercent: Int,
     ) = sendToAll(lights) {
         JSONObject()
             .put("method", "setPilot")
@@ -61,8 +60,7 @@ class WizLanController(context: Context) {
                     .put("state", true)
                     .put("r", color.red.coerceIn(0, 255))
                     .put("g", color.green.coerceIn(0, 255))
-                    .put("b", color.blue.coerceIn(0, 255))
-                    .put("dimming", brightnessPercent.coerceIn(10, 100)),
+                    .put("b", color.blue.coerceIn(0, 255)),
             )
     }
 

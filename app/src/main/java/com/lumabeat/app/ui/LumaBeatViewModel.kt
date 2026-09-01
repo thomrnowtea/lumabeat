@@ -14,6 +14,8 @@ import com.lumabeat.app.BuildConfig
 import com.lumabeat.app.audio.AudioLevelAnalyzer
 import com.lumabeat.app.audio.BeatPreset
 import com.lumabeat.app.audio.PlaybackCaptureService
+import com.lumabeat.app.media.ArtworkColorIntensity
+import com.lumabeat.app.media.MediaColorGradient
 import com.lumabeat.app.media.MediaColorRepository
 import com.lumabeat.app.media.MediaNotificationListenerService
 import com.lumabeat.app.update.AppUpdateInstaller
@@ -27,6 +29,7 @@ import com.lumabeat.app.wiz.LightColor
 import com.lumabeat.app.wiz.WizLanController
 import com.lumabeat.app.wiz.WizLight
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +49,7 @@ data class LumaBeatUiState(
     val autoStartEnabled: Boolean = false,
     val keepScreenOnEnabled: Boolean = true,
     val mediaColorsEnabled: Boolean = false,
+    val artworkColorIntensity: ArtworkColorIntensity = ArtworkColorIntensity.VIVID,
     val notificationAccessGranted: Boolean = false,
     val mediaPalette: List<LightColor> = emptyList(),
     val automaticUpdateChecks: Boolean = true,
@@ -60,14 +64,14 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     private val updateInstaller = AppUpdateInstaller(application)
     private val preferences = application.getSharedPreferences(PREFERENCES_NAME, 0)
     private val initialPreset = loadPreset()
+    private val initialArtworkColorIntensity = loadArtworkColorIntensity()
     private val excludedLightKeys = preferences
         .getStringSet(EXCLUDED_LIGHTS_KEY, emptySet())
         .orEmpty()
         .toMutableSet()
     private var audioJob: Job? = null
+    private var colorGradientJob: Job? = null
     private var updateJob: Job? = null
-    private var paletteIndex = 0
-    private var lastColorRotationMillis = 0L
     private val mutableState = MutableStateFlow(
         LumaBeatUiState(
             beatPreset = initialPreset,
@@ -75,6 +79,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
             autoStartEnabled = preferences.getBoolean(AUTO_START_KEY, false),
             keepScreenOnEnabled = preferences.getBoolean(KEEP_SCREEN_ON_KEY, true),
             mediaColorsEnabled = preferences.getBoolean(MEDIA_COLORS_KEY, false),
+            artworkColorIntensity = initialArtworkColorIntensity,
             notificationAccessGranted = hasNotificationAccess(),
             automaticUpdateChecks = preferences.getBoolean(AUTOMATIC_UPDATES_KEY, true),
         ),
@@ -84,9 +89,9 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     init {
         viewModelScope.launch {
             MediaColorRepository.colors.collect { colors ->
-                paletteIndex = 0
-                lastColorRotationMillis = 0L
-                mutableState.update { it.copy(mediaPalette = colors.take(3)) }
+                mutableState.update { current ->
+                    current.copy(mediaPalette = current.artworkColorIntensity.apply(colors))
+                }
             }
         }
         if (state.value.automaticUpdateChecks) checkForUpdates(manual = false)
@@ -172,11 +177,31 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setArtworkColorIntensity(intensity: ArtworkColorIntensity) {
+        preferences.edit().putString(ARTWORK_COLOR_INTENSITY_KEY, intensity.name).apply()
+        mutableState.update {
+            it.copy(
+                artworkColorIntensity = intensity,
+                mediaPalette = intensity.apply(MediaColorRepository.colors.value),
+                message = "Artwork colors set to ${intensity.label.lowercase()}.",
+            )
+        }
+    }
+
     fun openNotificationAccessSettings() {
-        getApplication<Application>().startActivity(
-            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        val application = getApplication<Application>()
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(application.packageManager) != null) {
+            application.startActivity(intent)
+        } else {
+            mutableState.update {
+                it.copy(
+                    message = "This TV firmware does not provide notification access settings. " +
+                        "Enable LumaBeat's notification listener through ADB.",
+                )
+            }
+        }
     }
 
     fun refreshNotificationAccess() {
@@ -212,8 +237,10 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 mutableState.update {
                     it.copy(message = "Listening to the device audio output.")
                 }
+                startMediaColorGradient()
                 collectAudioLevels()
             } finally {
+                stopMediaColorGradient()
                 PlaybackCaptureService.stop(application)
             }
         }
@@ -222,6 +249,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     fun stopAudioReactiveBrightness() {
         audioJob?.cancel()
         audioJob = null
+        stopMediaColorGradient()
         PlaybackCaptureService.stop(getApplication())
         mutableState.update {
             it.copy(
@@ -393,13 +421,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 val now = SystemClock.elapsedRealtime()
                 if (level.isBeat) {
                     val preset = state.value.beatPreset
-                    val lights = participatingLights()
-                    val mediaColor = mediaColorForBeat(now)
-                    if (mediaColor == null) {
-                        controller.setBrightness(lights, preset.peakBrightness)
-                    } else {
-                        controller.setColor(lights, mediaColor, preset.peakBrightness)
-                    }
+                    controller.setBrightness(participatingLights(), preset.peakBrightness)
                     lastBeatMillis = now
                     releaseSent = false
                     mutableState.update { it.copy(currentBrightness = preset.peakBrightness) }
@@ -448,17 +470,48 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         light.stableKey() in state.value.includedLightKeys
     }
 
-    private fun mediaColorForBeat(now: Long): LightColor? {
-        val current = state.value
-        if (!current.mediaColorsEnabled || !current.notificationAccessGranted) return null
-        val colors = current.mediaPalette
-        if (colors.isEmpty()) return null
-        if (lastColorRotationMillis == 0L) lastColorRotationMillis = now
-        if (now - lastColorRotationMillis >= COLOR_ROTATION_INTERVAL_MS) {
-            paletteIndex = (paletteIndex + 1) % colors.size
-            lastColorRotationMillis = now
+    private fun startMediaColorGradient() {
+        colorGradientJob?.cancel()
+        colorGradientJob = viewModelScope.launch {
+            var activePalette = emptyList<LightColor>()
+            var transitionFrom: LightColor? = null
+            var transitionStartedAtMillis = SystemClock.elapsedRealtime()
+            var lastColor: LightColor? = null
+            var lastLightKeys = emptySet<String>()
+            while (true) {
+                val current = state.value
+                val now = SystemClock.elapsedRealtime()
+                if (current.mediaPalette != activePalette) {
+                    activePalette = current.mediaPalette
+                    transitionFrom = lastColor?.takeUnless { color -> color == activePalette.firstOrNull() }
+                    transitionStartedAtMillis = now
+                }
+                val lights = participatingLights()
+                val lightKeys = lights.mapTo(mutableSetOf()) { light -> light.stableKey() }
+                val color = if (current.mediaColorsEnabled && current.notificationAccessGranted) {
+                    MediaColorGradient.colorAt(
+                        palette = activePalette,
+                        elapsedMillis = now - transitionStartedAtMillis,
+                        segmentDurationMillis = COLOR_GRADIENT_SEGMENT_MILLIS,
+                        transitionFrom = transitionFrom,
+                    )
+                } else {
+                    null
+                }
+                if (color != null && (color != lastColor || lightKeys != lastLightKeys)) {
+                    runCatching { controller.setColor(lights, color) }
+                        .onFailure { error -> Log.w(COLOR_LOG_TAG, "Could not update WiZ color.", error) }
+                }
+                lastColor = color
+                lastLightKeys = lightKeys
+                delay(COLOR_GRADIENT_FRAME_MILLIS)
+            }
         }
-        return colors[paletteIndex.coerceIn(colors.indices)]
+    }
+
+    private fun stopMediaColorGradient() {
+        colorGradientJob?.cancel()
+        colorGradientJob = null
     }
 
     private fun hasNotificationAccess(): Boolean = NotificationManagerCompat
@@ -480,15 +533,27 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         )
     }.getOrDefault(BeatPreset.MARCADO)
 
+    private fun loadArtworkColorIntensity(): ArtworkColorIntensity = runCatching {
+        ArtworkColorIntensity.valueOf(
+            preferences.getString(
+                ARTWORK_COLOR_INTENSITY_KEY,
+                ArtworkColorIntensity.VIVID.name,
+            ).orEmpty(),
+        )
+    }.getOrDefault(ArtworkColorIntensity.VIVID)
+
     private companion object {
         const val AUDIO_LOG_TAG = "LumaBeatAudio"
+        const val COLOR_LOG_TAG = "LumaBeatColor"
         const val PREFERENCES_NAME = "lumabeat_preferences"
         const val PRESET_KEY = "beat_preset"
         const val EXCLUDED_LIGHTS_KEY = "excluded_light_keys"
         const val AUTO_START_KEY = "auto_start_enabled"
         const val KEEP_SCREEN_ON_KEY = "keep_screen_on_enabled"
         const val MEDIA_COLORS_KEY = "media_colors_enabled"
+        const val ARTWORK_COLOR_INTENSITY_KEY = "artwork_color_intensity"
         const val AUTOMATIC_UPDATES_KEY = "automatic_update_checks"
-        const val COLOR_ROTATION_INTERVAL_MS = 5_000L
+        const val COLOR_GRADIENT_SEGMENT_MILLIS = 5_000L
+        const val COLOR_GRADIENT_FRAME_MILLIS = 120L
     }
 }

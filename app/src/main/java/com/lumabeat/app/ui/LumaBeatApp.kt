@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -14,19 +15,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -38,8 +38,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -71,8 +69,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -80,6 +76,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lumabeat.app.BuildConfig
 import com.lumabeat.app.audio.BeatPreset
+import com.lumabeat.app.media.ArtworkColorIntensity
 import com.lumabeat.app.update.AppUpdateStatus
 import com.lumabeat.app.update.UpdateFailure
 import com.lumabeat.app.wiz.WizLight
@@ -105,7 +102,8 @@ private val LumaBeatColors = darkColorScheme(
     onSurface = TextPrimary,
 )
 
-private enum class OptionsPage {
+private enum class AppPage {
+    Dashboard,
     Settings,
     Licenses,
 }
@@ -178,6 +176,7 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
             onAutoStartChange = viewModel::setAutoStartEnabled,
             onKeepScreenOnChange = viewModel::setKeepScreenOnEnabled,
             onMediaColorsChange = viewModel::setMediaColorsEnabled,
+            onArtworkColorIntensityChange = viewModel::setArtworkColorIntensity,
             onOpenNotificationAccess = viewModel::openNotificationAccessSettings,
             onAutomaticUpdatesChange = viewModel::setAutomaticUpdateChecks,
             onCheckForUpdates = { viewModel.checkForUpdates() },
@@ -198,6 +197,7 @@ private fun LumaBeatScreen(
     onAutoStartChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
     onMediaColorsChange: (Boolean) -> Unit,
+    onArtworkColorIntensityChange: (ArtworkColorIntensity) -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onAutomaticUpdatesChange: (Boolean) -> Unit,
     onCheckForUpdates: () -> Unit,
@@ -205,8 +205,11 @@ private fun LumaBeatScreen(
     onInstallUpdate: () -> Unit,
     onOpenInstallPermission: () -> Unit,
 ) {
-    var optionsExpanded by remember { mutableStateOf(false) }
-    var optionsPage by remember { mutableStateOf<OptionsPage?>(null) }
+    var currentPage by rememberSaveable { mutableStateOf(AppPage.Dashboard) }
+
+    BackHandler(enabled = currentPage != AppPage.Dashboard) {
+        currentPage = if (currentPage == AppPage.Licenses) AppPage.Settings else AppPage.Dashboard
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -214,60 +217,64 @@ private fun LumaBeatScreen(
             .background(Brush.linearGradient(listOf(BackgroundTop, BackgroundBottom))),
     ) {
         val isTvLayout = maxWidth >= 700.dp && maxWidth > maxHeight
-        if (isTvLayout) {
-            TvDashboard(
+        when (currentPage) {
+            AppPage.Dashboard -> if (isTvLayout) {
+                TvDashboard(
+                    state = state,
+                    onOpenSettings = { currentPage = AppPage.Settings },
+                    onDiscover = onDiscover,
+                    onPresetSelected = onPresetSelected,
+                    onLightIncludedChange = onLightIncludedChange,
+                    onListeningToggle = onListeningToggle,
+                    onMediaColorsChange = onMediaColorsChange,
+                    onArtworkColorIntensityChange = onArtworkColorIntensityChange,
+                    onOpenNotificationAccess = onOpenNotificationAccess,
+                )
+            } else {
+                PhoneDashboard(
+                    state = state,
+                    onOpenSettings = { currentPage = AppPage.Settings },
+                    onDiscover = onDiscover,
+                    onPresetSelected = onPresetSelected,
+                    onLightIncludedChange = onLightIncludedChange,
+                    onListeningToggle = onListeningToggle,
+                    onMediaColorsChange = onMediaColorsChange,
+                    onArtworkColorIntensityChange = onArtworkColorIntensityChange,
+                    onOpenNotificationAccess = onOpenNotificationAccess,
+                )
+            }
+            AppPage.Settings -> SettingsScreen(
                 state = state,
-                optionsExpanded = optionsExpanded,
-                onOptionsExpandedChange = { optionsExpanded = it },
-                onOptionsPageSelected = { optionsPage = it },
-                onDiscover = onDiscover,
-                onPresetSelected = onPresetSelected,
-                onLightIncludedChange = onLightIncludedChange,
-                onListeningToggle = onListeningToggle,
+                compact = isTvLayout,
+                onBack = { currentPage = AppPage.Dashboard },
+                onOpenLicenses = { currentPage = AppPage.Licenses },
+                onAutoStartChange = onAutoStartChange,
+                onKeepScreenOnChange = onKeepScreenOnChange,
+                onAutomaticUpdatesChange = onAutomaticUpdatesChange,
+                onCheckForUpdates = onCheckForUpdates,
+                onDownloadUpdate = onDownloadUpdate,
+                onInstallUpdate = onInstallUpdate,
+                onOpenInstallPermission = onOpenInstallPermission,
             )
-        } else {
-            PhoneDashboard(
-                state = state,
-                optionsExpanded = optionsExpanded,
-                onOptionsExpandedChange = { optionsExpanded = it },
-                onOptionsPageSelected = { optionsPage = it },
-                onDiscover = onDiscover,
-                onPresetSelected = onPresetSelected,
-                onLightIncludedChange = onLightIncludedChange,
-                onListeningToggle = onListeningToggle,
+            AppPage.Licenses -> LicensesScreen(
+                compact = isTvLayout,
+                onBack = { currentPage = AppPage.Settings },
             )
         }
-    }
-
-    when (optionsPage) {
-        OptionsPage.Settings -> SettingsDialog(
-            state = state,
-            onAutoStartChange = onAutoStartChange,
-            onKeepScreenOnChange = onKeepScreenOnChange,
-            onMediaColorsChange = onMediaColorsChange,
-            onOpenNotificationAccess = onOpenNotificationAccess,
-            onAutomaticUpdatesChange = onAutomaticUpdatesChange,
-            onCheckForUpdates = onCheckForUpdates,
-            onDownloadUpdate = onDownloadUpdate,
-            onInstallUpdate = onInstallUpdate,
-            onOpenInstallPermission = onOpenInstallPermission,
-            onDismiss = { optionsPage = null },
-        )
-        OptionsPage.Licenses -> LicensesDialog(onDismiss = { optionsPage = null })
-        null -> Unit
     }
 }
 
 @Composable
 private fun TvDashboard(
     state: LumaBeatUiState,
-    optionsExpanded: Boolean,
-    onOptionsExpandedChange: (Boolean) -> Unit,
-    onOptionsPageSelected: (OptionsPage) -> Unit,
+    onOpenSettings: () -> Unit,
     onDiscover: () -> Unit,
     onPresetSelected: (BeatPreset) -> Unit,
     onLightIncludedChange: (WizLight, Boolean) -> Unit,
     onListeningToggle: () -> Unit,
+    onMediaColorsChange: (Boolean) -> Unit,
+    onArtworkColorIntensityChange: (ArtworkColorIntensity) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -279,9 +286,7 @@ private fun TvDashboard(
         Header(
             state = state,
             compact = true,
-            optionsExpanded = optionsExpanded,
-            onOptionsExpandedChange = onOptionsExpandedChange,
-            onOptionsPageSelected = onOptionsPageSelected,
+            onOpenSettings = onOpenSettings,
         )
         Spacer(Modifier.height(10.dp))
         Row(
@@ -308,15 +313,27 @@ private fun TvDashboard(
                     onPresetSelected = onPresetSelected,
                 )
             }
-            LightsPanel(
-                state = state,
-                compact = true,
-                onDiscover = onDiscover,
-                onLightIncludedChange = onLightIncludedChange,
+            Column(
                 modifier = Modifier
                     .weight(0.88f)
                     .fillMaxHeight(),
-            )
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LightsPanel(
+                    state = state,
+                    compact = true,
+                    onDiscover = onDiscover,
+                    onLightIncludedChange = onLightIncludedChange,
+                    modifier = Modifier.weight(1f),
+                )
+                ArtworkColorsPanel(
+                    state = state,
+                    compact = true,
+                    onEnabledChange = onMediaColorsChange,
+                    onIntensityChange = onArtworkColorIntensityChange,
+                    onOpenNotificationAccess = onOpenNotificationAccess,
+                )
+            }
         }
     }
 }
@@ -324,13 +341,14 @@ private fun TvDashboard(
 @Composable
 private fun PhoneDashboard(
     state: LumaBeatUiState,
-    optionsExpanded: Boolean,
-    onOptionsExpandedChange: (Boolean) -> Unit,
-    onOptionsPageSelected: (OptionsPage) -> Unit,
+    onOpenSettings: () -> Unit,
     onDiscover: () -> Unit,
     onPresetSelected: (BeatPreset) -> Unit,
     onLightIncludedChange: (WizLight, Boolean) -> Unit,
     onListeningToggle: () -> Unit,
+    onMediaColorsChange: (Boolean) -> Unit,
+    onArtworkColorIntensityChange: (ArtworkColorIntensity) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -344,12 +362,17 @@ private fun PhoneDashboard(
         Header(
             state = state,
             compact = false,
-            optionsExpanded = optionsExpanded,
-            onOptionsExpandedChange = onOptionsExpandedChange,
-            onOptionsPageSelected = onOptionsPageSelected,
+            onOpenSettings = onOpenSettings,
         )
         ListeningCard(state, compact = false, onToggle = onListeningToggle)
         PresetPanel(state.beatPreset, compact = false, onPresetSelected)
+        ArtworkColorsPanel(
+            state = state,
+            compact = false,
+            onEnabledChange = onMediaColorsChange,
+            onIntensityChange = onArtworkColorIntensityChange,
+            onOpenNotificationAccess = onOpenNotificationAccess,
+        )
         LightsPanel(
             state = state,
             compact = false,
@@ -363,9 +386,7 @@ private fun PhoneDashboard(
 private fun Header(
     state: LumaBeatUiState,
     compact: Boolean,
-    optionsExpanded: Boolean,
-    onOptionsExpandedChange: (Boolean) -> Unit,
-    onOptionsPageSelected: (OptionsPage) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -400,35 +421,15 @@ private fun Header(
         Spacer(Modifier.width(8.dp))
         Box {
             IconButton(
-                onClick = { onOptionsExpandedChange(true) },
+                onClick = onOpenSettings,
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(SurfaceRaised)
                     .tvFocus(CircleShape)
-                    .semantics { contentDescription = "More options" },
+                    .semantics { contentDescription = "Open settings" },
             ) {
                 Text("⋮", color = TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            }
-            DropdownMenu(
-                expanded = optionsExpanded,
-                onDismissRequest = { onOptionsExpandedChange(false) },
-                containerColor = SurfaceRaised,
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Settings") },
-                    onClick = {
-                        onOptionsExpandedChange(false)
-                        onOptionsPageSelected(OptionsPage.Settings)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Licenses") },
-                    onClick = {
-                        onOptionsExpandedChange(false)
-                        onOptionsPageSelected(OptionsPage.Licenses)
-                    },
-                )
             }
         }
     }
@@ -774,140 +775,69 @@ private fun LightRow(
 }
 
 @Composable
-private fun SettingsDialog(
+private fun ArtworkColorsPanel(
     state: LumaBeatUiState,
-    onAutoStartChange: (Boolean) -> Unit,
-    onKeepScreenOnChange: (Boolean) -> Unit,
-    onMediaColorsChange: (Boolean) -> Unit,
+    compact: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onIntensityChange: (ArtworkColorIntensity) -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onAutomaticUpdatesChange: (Boolean) -> Unit,
-    onCheckForUpdates: () -> Unit,
-    onDownloadUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit,
-    onOpenInstallPermission: () -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Surface),
+        shape = RoundedCornerShape(if (compact) 20.dp else 24.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+        Column(
+            modifier = Modifier.padding(horizontal = if (compact) 15.dp else 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            val compact = maxWidth > maxHeight
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(if (compact) 0.76f else 0.90f)
-                    .heightIn(max = maxHeight * 0.92f)
-                    .widthIn(max = 760.dp),
-                colors = CardDefaults.cardColors(containerColor = Surface),
-                shape = RoundedCornerShape(26.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState())
-                        .padding(if (compact) 20.dp else 24.dp),
-                ) {
-                    Text("Settings", color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text("Preferences for a permanent Android TV setup.", color = TextSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(if (compact) 12.dp else 18.dp))
-                    if (compact) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingSwitchRow(
-                                    title = "Auto start",
-                                    subtitle = "Starts after finding lights",
-                                    checked = state.autoStartEnabled,
-                                    onCheckedChange = onAutoStartChange,
-                                )
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingSwitchRow(
-                                    title = "Keep awake",
-                                    subtitle = "Prevents TV sleep",
-                                    checked = state.keepScreenOnEnabled,
-                                    onCheckedChange = onKeepScreenOnChange,
-                                )
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                SettingSwitchRow(
-                                    title = "Artwork colors",
-                                    subtitle = "Cycles through the top 3",
-                                    checked = state.mediaColorsEnabled,
-                                    onCheckedChange = onMediaColorsChange,
-                                )
-                            }
-                        }
-                    } else {
-                        SettingSwitchRow(
-                            title = "Auto start",
-                            subtitle = "Starts beat tracking after finding lights",
-                            checked = state.autoStartEnabled,
-                            onCheckedChange = onAutoStartChange,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        SettingSwitchRow(
-                            title = "Keep screen awake",
-                            subtitle = "Prevents Android TV from suspending this screen",
-                            checked = state.keepScreenOnEnabled,
-                            onCheckedChange = onKeepScreenOnChange,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        SettingSwitchRow(
-                            title = "Artwork colors",
-                            subtitle = "Cycles through the three dominant album-art colors",
-                            checked = state.mediaColorsEnabled,
-                            onCheckedChange = onMediaColorsChange,
-                        )
-                    }
-                    if (state.mediaColorsEnabled) {
-                        Spacer(Modifier.height(10.dp))
-                        ArtworkAccessRow(state, onOpenNotificationAccess)
-                    }
-                    Spacer(Modifier.height(if (compact) 12.dp else 18.dp))
-                    SettingSwitchRow(
-                        title = "Automatic update checks",
-                        subtitle = "Checks verified GitHub Releases at startup",
-                        checked = state.automaticUpdateChecks,
-                        onCheckedChange = onAutomaticUpdatesChange,
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Artwork colors",
+                        color = TextPrimary,
+                        fontSize = if (compact) 16.sp else 19.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                    Spacer(Modifier.height(10.dp))
-                    UpdatePanel(
-                        status = state.appUpdateStatus,
-                        onCheck = onCheckForUpdates,
-                        onDownload = onDownloadUpdate,
-                        onInstall = onInstallUpdate,
-                        onOpenInstallPermission = onOpenInstallPermission,
+                    Text(
+                        if (state.mediaColorsEnabled) "Smooth gradient active" else "Use the current media artwork",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
                     )
-                    Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
+                }
+                Switch(
+                    checked = state.mediaColorsEnabled,
+                    onCheckedChange = onEnabledChange,
+                    modifier = Modifier.semantics { contentDescription = "Use artwork colors" },
+                )
+            }
+            if (state.mediaColorsEnabled) {
+                if (compact) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Surface(
-                            modifier = Modifier.weight(1f),
-                            color = SurfaceRaised,
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                                Text("Device output mix", color = TextSecondary, fontSize = 12.sp)
-                            }
-                        }
-                        Button(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .tvFocus(RoundedCornerShape(14.dp)),
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Text("Close")
-                        }
+                        DetectedPalette(state, Modifier.weight(1f))
+                        IntensitySelector(state.artworkColorIntensity, onIntensityChange, Modifier.weight(1.1f))
+                    }
+                } else {
+                    DetectedPalette(state)
+                    IntensitySelector(state.artworkColorIntensity, onIntensityChange)
+                }
+                if (!state.notificationAccessGranted) {
+                    OutlinedButton(
+                        onClick = onOpenNotificationAccess,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .tvFocus(RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("Grant media access")
                     }
                 }
             }
@@ -916,56 +846,249 @@ private fun SettingsDialog(
 }
 
 @Composable
-private fun ArtworkAccessRow(
-    state: LumaBeatUiState,
-    onOpenNotificationAccess: () -> Unit,
-) {
-    Surface(color = SurfaceRaised, shape = RoundedCornerShape(14.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    if (state.notificationAccessGranted) "Media access granted" else "Media access required",
-                    color = if (state.notificationAccessGranted) Green else TextPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    if (state.notificationAccessGranted) {
-                        "Album artwork is read locally; audio and DRM content are untouched."
-                    } else {
-                        "Allow LumaBeat to read media notifications and album artwork."
-                    },
-                    color = TextSecondary,
-                    fontSize = 11.sp,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun DetectedPalette(state: LumaBeatUiState, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(
+            "Detected palette · ${state.mediaPalette.size}/3",
+            color = TextSecondary,
+            fontSize = 10.sp,
+        )
+        Spacer(Modifier.height(5.dp))
+        if (state.mediaPalette.isEmpty()) {
+            Text("Waiting for media artwork", color = TextSecondary, fontSize = 11.sp)
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 state.mediaPalette.take(3).forEach { color ->
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(Color(color.red, color.green, color.blue)),
-                    )
-                }
-            }
-            if (!state.notificationAccessGranted) {
-                Spacer(Modifier.width(10.dp))
-                OutlinedButton(
-                    onClick = onOpenNotificationAccess,
-                    modifier = Modifier
-                        .height(44.dp)
-                        .tvFocus(RoundedCornerShape(12.dp)),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("Grant access")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(Color(color.red, color.green, color.blue))
+                                .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape),
+                        )
+                        Text(
+                            "#%02X%02X%02X".format(color.red, color.green, color.blue),
+                            color = TextSecondary,
+                            fontSize = 8.sp,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun IntensitySelector(
+    selected: ArtworkColorIntensity,
+    onSelected: (ArtworkColorIntensity) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text("Color intensity", color = TextSecondary, fontSize = 10.sp)
+        Spacer(Modifier.height(5.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            ArtworkColorIntensity.entries.forEach { intensity ->
+                val isSelected = intensity == selected
+                OutlinedButton(
+                    onClick = { onSelected(intensity) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .tvFocus(RoundedCornerShape(10.dp)),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (isSelected) VioletSoft else SurfaceRaised,
+                        contentColor = TextPrimary,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                ) {
+                    Text(intensity.label, fontSize = 9.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    state: LumaBeatUiState,
+    compact: Boolean,
+    onBack: () -> Unit,
+    onOpenLicenses: () -> Unit,
+    onAutoStartChange: (Boolean) -> Unit,
+    onKeepScreenOnChange: (Boolean) -> Unit,
+    onAutomaticUpdatesChange: (Boolean) -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onOpenInstallPermission: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = if (compact) 28.dp else 20.dp, vertical = if (compact) 12.dp else 18.dp),
+    ) {
+        InternalPageHeader("Settings", "Permanent playback and application preferences", onBack)
+        Spacer(Modifier.height(if (compact) 16.dp else 20.dp))
+        if (compact) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                GeneralSettingsCard(
+                    state = state,
+                    onAutoStartChange = onAutoStartChange,
+                    onKeepScreenOnChange = onKeepScreenOnChange,
+                    modifier = Modifier.weight(1f),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    UpdateSettingsCard(
+                        state = state,
+                        onAutomaticUpdatesChange = onAutomaticUpdatesChange,
+                        onCheckForUpdates = onCheckForUpdates,
+                        onDownloadUpdate = onDownloadUpdate,
+                        onInstallUpdate = onInstallUpdate,
+                        onOpenInstallPermission = onOpenInstallPermission,
+                    )
+                    SettingsNavigationRow("Licenses", "Open-source notices and application version", onOpenLicenses)
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GeneralSettingsCard(state, onAutoStartChange, onKeepScreenOnChange)
+                UpdateSettingsCard(
+                    state = state,
+                    onAutomaticUpdatesChange = onAutomaticUpdatesChange,
+                    onCheckForUpdates = onCheckForUpdates,
+                    onDownloadUpdate = onDownloadUpdate,
+                    onInstallUpdate = onInstallUpdate,
+                    onOpenInstallPermission = onOpenInstallPermission,
+                )
+                SettingsNavigationRow("Licenses", "Open-source notices and application version", onOpenLicenses)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InternalPageHeader(title: String, subtitle: String, onBack: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier
+                .height(46.dp)
+                .tvFocus(RoundedCornerShape(13.dp)),
+            shape = RoundedCornerShape(13.dp),
+        ) {
+            Text("Back")
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(title, color = TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun GeneralSettingsCard(
+    state: LumaBeatUiState,
+    onAutoStartChange: (Boolean) -> Unit,
+    onKeepScreenOnChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Playback", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            SettingSwitchRow(
+                title = "Auto start",
+                subtitle = "Start tracking after lights are found",
+                checked = state.autoStartEnabled,
+                onCheckedChange = onAutoStartChange,
+            )
+            SettingSwitchRow(
+                title = "Keep screen awake",
+                subtitle = "Prevent Android TV from suspending LumaBeat",
+                checked = state.keepScreenOnEnabled,
+                onCheckedChange = onKeepScreenOnChange,
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = SurfaceRaised,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Device output mix", color = TextSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateSettingsCard(
+    state: LumaBeatUiState,
+    onAutomaticUpdatesChange: (Boolean) -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onOpenInstallPermission: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Application", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            SettingSwitchRow(
+                title = "Automatic update checks",
+                subtitle = "Check verified GitHub Releases at startup",
+                checked = state.automaticUpdateChecks,
+                onCheckedChange = onAutomaticUpdatesChange,
+            )
+            UpdatePanel(
+                status = state.appUpdateStatus,
+                onCheck = onCheckForUpdates,
+                onDownload = onDownloadUpdate,
+                onInstall = onInstallUpdate,
+                onOpenInstallPermission = onOpenInstallPermission,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(title: String, subtitle: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Surface)
+            .tvFocus(shape)
+            .clickable(onClick = onClick)
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+        }
+        Text(">", color = Violet, fontSize = 22.sp)
     }
 }
 
@@ -1118,64 +1241,40 @@ private fun SettingSwitchRow(
 }
 
 @Composable
-private fun LicensesDialog(onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+private fun LicensesScreen(compact: Boolean, onBack: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = if (compact) 28.dp else 20.dp, vertical = if (compact) 12.dp else 18.dp),
     ) {
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+        InternalPageHeader("Licenses", "LumaBeat ${BuildConfig.VERSION_NAME}", onBack)
+        Spacer(Modifier.height(if (compact) 16.dp else 20.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Surface),
+            shape = RoundedCornerShape(22.dp),
         ) {
-            val compact = maxWidth > maxHeight
-            Card(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(if (compact) 0.72f else 0.90f)
-                    .heightIn(max = maxHeight * 0.92f)
-                    .widthIn(max = 720.dp),
-                colors = CardDefaults.cardColors(containerColor = Surface),
-                shape = RoundedCornerShape(26.dp),
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
             ) {
-                Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState())
-                        .padding(if (compact) 20.dp else 24.dp),
-                ) {
-                    Text("Licenses", color = TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text("LumaBeat ${BuildConfig.VERSION_NAME}", color = Violet, fontSize = 14.sp)
-                    Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
-                    Text("Copyright © 2026 LumaBeat. All rights reserved.", color = TextSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
-                    HorizontalDivider(color = SurfaceRaised)
-                    Spacer(Modifier.height(if (compact) 10.dp else 16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Open-source software", color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                "AndroidX, Jetpack Compose, Kotlin, and kotlinx.coroutines · Apache License 2.0",
-                                color = TextSecondary,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                            )
-                            Text("apache.org/licenses/LICENSE-2.0", color = Cyan, fontSize = 12.sp)
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Button(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .height(48.dp)
-                                .tvFocus(RoundedCornerShape(14.dp)),
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Text("Close")
-                        }
-                    }
-                }
+                Text("LumaBeat", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("Copyright © 2026 LumaBeat. All rights reserved.", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.height(20.dp))
+                HorizontalDivider(color = SurfaceRaised)
+                Spacer(Modifier.height(20.dp))
+                Text("Open-source software", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "AndroidX, Jetpack Compose, Kotlin, and kotlinx.coroutines · Apache License 2.0",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Text("apache.org/licenses/LICENSE-2.0", color = Cyan, fontSize = 12.sp)
             }
         }
     }
