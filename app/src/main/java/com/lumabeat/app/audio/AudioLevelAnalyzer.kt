@@ -77,7 +77,10 @@ class AudioLevelAnalyzer {
     }
 
     private companion object {
-        const val ANALYSIS_INTERVAL_MS = 50L
+        // A 50 ms poll can entirely miss the short attack of a kick or snare. The
+        // captured window is about 23 ms at 44.1 kHz, so polling every 20 ms keeps
+        // adjacent windows effectively continuous without increasing FFT size.
+        const val ANALYSIS_INTERVAL_MS = 20L
         const val SIGNAL_THRESHOLD_RMS = 0.001f
         const val OUTPUT_MIX_AUDIO_SESSION = 0
         const val UNSIGNED_BYTE_CENTER = 128

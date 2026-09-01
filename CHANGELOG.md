@@ -4,6 +4,7 @@ All notable changes to LumaBeat are documented here.
 
 ## Unreleased
 
+- Reduce beat latency with near-continuous audio windows, non-blocking brightness dispatch, and a reusable WiZ UDP socket.
 - Blend continuously between artwork colors and across track changes while keeping percussion pulses limited to brightness.
 - Limit artwork palettes to three colors, keep white, ignore black and gray, and fall back safely for monochrome covers.
 - Preserve faithful artwork colors, group similar hue families, and add Natural, Vivid, and Bold saturation choices.

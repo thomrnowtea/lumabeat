@@ -10,10 +10,14 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
+import java.util.concurrent.ConcurrentHashMap
 
 class WizLanController(context: Context) {
     private val appContext = context.applicationContext
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val commandSocket = DatagramSocket()
+    private val commandSocketLock = Any()
+    private val addressCache = ConcurrentHashMap<String, InetAddress>()
 
     suspend fun discover(timeoutMillis: Int = DISCOVERY_TIMEOUT_MS): List<WizLight> =
         withContext(Dispatchers.IO) {
@@ -80,6 +84,10 @@ class WizLanController(context: Context) {
             )
     }
 
+    fun close() {
+        commandSocket.close()
+    }
+
     private fun discoverOnLan(timeoutMillis: Int): List<WizLight> {
         val request = JSONObject()
             .put("method", "getSystemConfig")
@@ -115,6 +123,7 @@ class WizLanController(context: Context) {
             }
             receiveLightsUntil(socket, deadline, found)
         }
+
         return found.values.sortedBy(WizLight::displayName)
     }
 
@@ -189,7 +198,7 @@ class WizLanController(context: Context) {
         payload: () -> JSONObject,
     ) = withContext(Dispatchers.IO) {
         val command = payload()
-        DatagramSocket().use { socket ->
+        synchronized(commandSocketLock) {
             lights.forEach { light ->
                 val bridged = light.bridgeHost != null
                 val data = if (bridged) {
@@ -205,13 +214,16 @@ class WizLanController(context: Context) {
                 val packet = DatagramPacket(
                     data,
                     data.size,
-                    InetAddress.getByName(light.bridgeHost ?: light.ipAddress),
+                    resolveAddress(light.bridgeHost ?: light.ipAddress),
                     if (bridged) BRIDGE_PORT else WIZ_PORT,
                 )
-                socket.send(packet)
+                commandSocket.send(packet)
             }
         }
     }
+
+    private fun resolveAddress(host: String): InetAddress =
+        addressCache.getOrPut(host) { InetAddress.getByName(host) }
 
     private fun isAndroidEmulator(): Boolean =
         Build.FINGERPRINT.startsWith("generic") ||

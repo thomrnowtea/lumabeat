@@ -29,7 +29,9 @@ import com.lumabeat.app.wiz.LightColor
 import com.lumabeat.app.wiz.WizLanController
 import com.lumabeat.app.wiz.WizLight
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +74,9 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     private var audioJob: Job? = null
     private var colorGradientJob: Job? = null
     private var updateJob: Job? = null
+    // Lighting state is real-time: if the network stalls, keep the newest target
+    // instead of replaying an obsolete queue of peaks and releases later.
+    private val brightnessCommands = Channel<BrightnessCommand>(Channel.CONFLATED)
     private val mutableState = MutableStateFlow(
         LumaBeatUiState(
             beatPreset = initialPreset,
@@ -87,6 +92,17 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<LumaBeatUiState> = mutableState.asStateFlow()
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (command in brightnessCommands) {
+                runCatching {
+                    controller.setBrightness(command.lights, command.brightness)
+                }.onSuccess {
+                    logPulse(command.phase, command.detectedAtMillis, command.brightness)
+                }.onFailure { error ->
+                    Log.w(PULSE_LOG_TAG, "Could not update WiZ brightness.", error)
+                }
+            }
+        }
         viewModelScope.launch {
             MediaColorRepository.colors.collect { colors ->
                 mutableState.update { current ->
@@ -401,6 +417,8 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        brightnessCommands.close()
+        controller.close()
         PlaybackCaptureService.stop(getApplication())
         super.onCleared()
     }
@@ -421,13 +439,13 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 val now = SystemClock.elapsedRealtime()
                 if (level.isBeat) {
                     val preset = state.value.beatPreset
-                    controller.setBrightness(participatingLights(), preset.peakBrightness)
+                    queueBrightness("peak", now, preset.peakBrightness)
                     lastBeatMillis = now
                     releaseSent = false
                     mutableState.update { it.copy(currentBrightness = preset.peakBrightness) }
                 } else if (!releaseSent && shouldRelease(now, lastBeatMillis)) {
                     val preset = state.value.beatPreset
-                    controller.setBrightness(participatingLights(), preset.baselineBrightness)
+                    queueBrightness("release", now, preset.baselineBrightness)
                     releaseSent = true
                     mutableState.update { it.copy(currentBrightness = preset.baselineBrightness) }
                 }
@@ -436,6 +454,17 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
 
     private fun shouldRelease(now: Long, lastBeatMillis: Long): Boolean =
         now - lastBeatMillis >= state.value.beatPreset.pulseDurationMillis
+
+    private fun queueBrightness(phase: String, detectedAtMillis: Long, brightness: Int) {
+        brightnessCommands.trySend(
+            BrightnessCommand(
+                phase = phase,
+                detectedAtMillis = detectedAtMillis,
+                brightness = brightness,
+                lights = participatingLights(),
+            ),
+        )
+    }
 
     private fun showDiscoveredLights(lights: List<WizLight>) {
         mutableState.update {
@@ -527,6 +556,14 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    private fun logPulse(phase: String, detectedAtMillis: Long, brightness: Int) {
+        Log.d(
+            PULSE_LOG_TAG,
+            "phase=$phase brightness=$brightness " +
+                "dispatchMs=${SystemClock.elapsedRealtime() - detectedAtMillis}",
+        )
+    }
+
     private fun loadPreset(): BeatPreset = runCatching {
         BeatPreset.valueOf(
             preferences.getString(PRESET_KEY, BeatPreset.MARCADO.name).orEmpty(),
@@ -544,6 +581,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
 
     private companion object {
         const val AUDIO_LOG_TAG = "LumaBeatAudio"
+        const val PULSE_LOG_TAG = "LumaBeatPulse"
         const val COLOR_LOG_TAG = "LumaBeatColor"
         const val PREFERENCES_NAME = "lumabeat_preferences"
         const val PRESET_KEY = "beat_preset"
@@ -557,3 +595,10 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         const val COLOR_GRADIENT_FRAME_MILLIS = 120L
     }
 }
+
+private data class BrightnessCommand(
+    val phase: String,
+    val detectedAtMillis: Long,
+    val brightness: Int,
+    val lights: List<WizLight>,
+)

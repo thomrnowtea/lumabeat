@@ -25,8 +25,8 @@ enum class BeatPreset(
         generalWeight = 0.34,
         hitGate = 0.28f,
         minimumHitLevel = 0.55f,
-        releaseMultiplier = 0.66f,
-        cooldownFrames = 4,
+        releaseMultiplier = 0.85f,
+        cooldownFrames = 10,
     ),
     MARCADO(
         label = "Punchy",
@@ -39,8 +39,8 @@ enum class BeatPreset(
         generalWeight = 0.44,
         hitGate = 0.20f,
         minimumHitLevel = 0.70f,
-        releaseMultiplier = 0.46f,
-        cooldownFrames = 3,
+        releaseMultiplier = 0.73f,
+        cooldownFrames = 7,
     ),
     INTENSO(
         label = "Intense",
@@ -53,7 +53,7 @@ enum class BeatPreset(
         generalWeight = 0.52,
         hitGate = 0.14f,
         minimumHitLevel = 0.80f,
-        releaseMultiplier = 0.32f,
-        cooldownFrames = 2,
+        releaseMultiplier = 0.63f,
+        cooldownFrames = 5,
     ),
 }

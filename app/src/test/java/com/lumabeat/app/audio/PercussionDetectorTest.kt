@@ -25,7 +25,7 @@ class PercussionDetectorTest {
         warmUp(detector, silence)
 
         val pulse = detector.analyze(bassDrumBurst(), WINDOW_SIZE)
-        val decayed = repeatAnalysis(detector, silence, 8)
+        val decayed = repeatAnalysis(detector, silence, FRAMES_FOR_400_MILLIS)
 
         assertTrue("expected a percussion event", pulse.isBeat)
         assertTrue("expected a marked pulse, got ${pulse.brightnessPercent}", pulse.brightnessPercent >= 75)
@@ -59,6 +59,21 @@ class PercussionDetectorTest {
 
         assertTrue(first.isBeat)
         assertTrue(second.isBeat)
+    }
+
+    @Test
+    fun regularKickPatternKeepsEveryBeatWithoutDoubleTriggering() {
+        val detector = PercussionDetector { BeatPreset.SUAVE }
+        val silence = ShortArray(WINDOW_SIZE)
+        warmUp(detector, silence)
+
+        repeat(4) {
+            assertTrue("kick $it was missed", detector.analyze(bassDrumBurst(), WINDOW_SIZE).isBeat)
+            val duplicateTriggers = (1..FRAMES_BETWEEN_SOFT_KICKS).count {
+                detector.analyze(silence, WINDOW_SIZE).isBeat
+            }
+            assertEquals("one kick produced multiple triggers", 0, duplicateTriggers)
+        }
     }
 
     @Test
@@ -105,5 +120,7 @@ class PercussionDetectorTest {
     private companion object {
         const val WINDOW_SIZE = 1_024
         const val SAMPLE_RATE = 44_100
+        const val FRAMES_FOR_400_MILLIS = 20
+        const val FRAMES_BETWEEN_SOFT_KICKS = 24
     }
 }
