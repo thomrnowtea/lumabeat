@@ -71,6 +71,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -276,7 +277,12 @@ private fun LumaBeatScreen(
                 ),
             ),
     ) {
-        val isTvLayout = maxWidth >= 700.dp && maxWidth > maxHeight
+        val fontScale = LocalDensity.current.fontScale
+        val isTvLayout = shouldUseCompactDashboard(
+            widthDp = maxWidth.value,
+            heightDp = maxHeight.value,
+            fontScale = fontScale,
+        )
         when (currentPage) {
             AppPage.Dashboard -> if (isTvLayout) {
                 TvDashboard(
@@ -458,49 +464,91 @@ private fun Header(
     compact: Boolean,
     onOpenSettings: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Image(
-            painter = painterResource(R.drawable.lumabeat_logo),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(if (compact) 40.dp else 48.dp)
-                .clip(RoundedCornerShape(LumaBeatRadius.Medium))
-                .border(1.dp, LumaBeatColor.Border, RoundedCornerShape(LumaBeatRadius.Medium)),
-        )
-        Column(
-            modifier = Modifier
-                .padding(start = 11.dp)
-                .weight(1f),
+    if (compact) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            BrandLogo(compact = true)
             Text(
-                text = "LumaBeat",
+                "LumaBeat",
+                modifier = Modifier
+                    .padding(start = 11.dp)
+                    .weight(1f),
                 color = TextPrimary,
-                fontSize = if (compact) 24.sp else 28.sp,
+                fontSize = 24.sp,
+                lineHeight = 25.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = if (compact) 25.sp else 31.sp,
+                maxLines = 1,
             )
-            if (!compact) {
-                Text("Percussion becomes light", color = TextSecondary, fontSize = 13.sp)
+            StatusPill(state)
+            Spacer(Modifier.width(8.dp))
+            SettingsButton(onOpenSettings)
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BrandLogo(compact = false)
+                Column(
+                    modifier = Modifier
+                        .padding(start = 11.dp)
+                        .weight(1f),
+                ) {
+                    Text(
+                        "LumaBeat",
+                        color = TextPrimary,
+                        fontSize = 28.sp,
+                        lineHeight = 31.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "Percussion becomes light",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                SettingsButton(onOpenSettings)
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                StatusPill(state)
             }
         }
-        StatusPill(state)
-        Spacer(Modifier.width(8.dp))
-        IconButton(
-            onClick = onOpenSettings,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(SurfaceRaised)
-                .border(1.dp, LumaBeatColor.Border, CircleShape)
-                .tvFocus(CircleShape)
-                .semantics { contentDescription = "Open settings" },
-        ) {
-            Text("...", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
+    }
+}
+
+@Composable
+private fun BrandLogo(compact: Boolean) {
+    Image(
+        painter = painterResource(R.drawable.lumabeat_logo),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(if (compact) 40.dp else 48.dp)
+            .clip(RoundedCornerShape(LumaBeatRadius.Medium))
+            .border(1.dp, LumaBeatColor.Border, RoundedCornerShape(LumaBeatRadius.Medium)),
+    )
+}
+
+@Composable
+private fun SettingsButton(onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(SurfaceRaised)
+            .border(1.dp, LumaBeatColor.Border, CircleShape)
+            .tvFocus(CircleShape)
+            .semantics { contentDescription = "Open settings" },
+    ) {
+        Text("...", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -513,7 +561,7 @@ private fun StatusPill(state: LumaBeatUiState) {
         state.isAudioReactive -> "Waiting for audio"
         activeLights > 0 -> "$activeLights ready"
         state.lights.any { it.isOn == false } -> "Lights off"
-        state.lights.isNotEmpty() -> "No lights selected"
+        state.lights.isNotEmpty() -> "None selected"
         else -> "No lights"
     }
     val statusColor = when {
@@ -553,7 +601,7 @@ private fun ListeningCard(
     val title = when {
         state.isAudioReactive && state.signalPresent -> "Following the beat"
         state.isAudioReactive -> "Listening for audio"
-        state.lights.isNotEmpty() && !state.hasActiveLights() -> "Turn on a selected light"
+        state.lights.isNotEmpty() && !state.hasActiveLights() -> "Turn on a light"
         else -> "Ready to listen"
     }
     val subtitle = when {
@@ -579,9 +627,13 @@ private fun ListeningCard(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .then(if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
                 .padding(if (compact) 15.dp else 24.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = if (compact) {
+                Arrangement.SpaceBetween
+            } else {
+                Arrangement.spacedBy(18.dp)
+            },
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -626,46 +678,14 @@ private fun ListeningCard(
                 color = if (state.signalPresent) Cyan else Violet,
                 trackColor = SurfaceRaised,
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = onToggle,
-                    enabled = trackingEnabled,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(if (compact) 44.dp else 58.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(primaryButtonBrush)
-                        .tvFocus(RoundedCornerShape(14.dp)),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        contentColor = Color.White,
-                        disabledContentColor = LumaBeatColor.TextMuted,
-                    ),
-                ) {
-                    Text(
-                        text = if (state.isAudioReactive) "Stop tracking" else "Start beat tracking",
-                        fontSize = if (compact) 14.sp else 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                OutlinedButton(
-                    onClick = onEnterBlackout,
-                    enabled = state.isAudioReactive,
-                    modifier = Modifier
-                        .width(if (compact) 136.dp else 148.dp)
-                        .height(if (compact) 44.dp else 58.dp)
-                        .tvFocus(RoundedCornerShape(14.dp)),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, LumaBeatColor.Border),
-                ) {
-                    Text("Black screen", fontSize = if (compact) 12.sp else 14.sp)
-                }
-            }
+            ListeningActions(
+                state = state,
+                compact = compact,
+                trackingEnabled = trackingEnabled,
+                primaryButtonBrush = primaryButtonBrush,
+                onToggle = onToggle,
+                onEnterBlackout = onEnterBlackout,
+            )
             if (!compact && state.isAudioReactive) {
                 Text(
                     "Beat tracking stays active. Press any key or tap to return.",
@@ -674,6 +694,124 @@ private fun ListeningCard(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ListeningActions(
+    state: LumaBeatUiState,
+    compact: Boolean,
+    trackingEnabled: Boolean,
+    primaryButtonBrush: Brush,
+    onToggle: () -> Unit,
+    onEnterBlackout: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val fontScale = LocalDensity.current.fontScale
+        val stackActions = !compact && maxWidth < 340.dp
+        if (stackActions) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TrackingButton(
+                    state = state,
+                    compact = false,
+                    enabled = trackingEnabled,
+                    background = primaryButtonBrush,
+                    onClick = onToggle,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                BlackoutButton(
+                    compact = false,
+                    enabled = state.isAudioReactive,
+                    onClick = onEnterBlackout,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TrackingButton(
+                    state = state,
+                    compact = compact,
+                    enabled = trackingEnabled,
+                    background = primaryButtonBrush,
+                    onClick = onToggle,
+                    modifier = Modifier.weight(1f),
+                )
+                BlackoutButton(
+                    compact = compact,
+                    enabled = state.isAudioReactive,
+                    onClick = onEnterBlackout,
+                    modifier = Modifier.width(blackoutButtonWidthDp(compact, fontScale).dp),
+                )
+            }
+        }
+    }
+}
+
+internal fun shouldUseCompactDashboard(widthDp: Float, heightDp: Float, fontScale: Float): Boolean =
+    widthDp >= 700f && heightDp >= 360f && widthDp > heightDp && fontScale <= 1.15f
+
+internal fun blackoutButtonWidthDp(compact: Boolean, fontScale: Float): Int = when {
+    compact -> 136
+    fontScale > 1.15f -> 184
+    else -> 148
+}
+
+@Composable
+private fun TrackingButton(
+    state: LumaBeatUiState,
+    compact: Boolean,
+    enabled: Boolean,
+    background: Brush,
+    onClick: () -> Unit,
+    modifier: Modifier,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .height(if (compact) 44.dp else 58.dp)
+            .clip(shape)
+            .background(background)
+            .tvFocus(shape),
+        shape = shape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            contentColor = Color.White,
+            disabledContentColor = LumaBeatColor.TextMuted,
+        ),
+    ) {
+        Text(
+            text = if (state.isAudioReactive) "Stop tracking" else "Start beat tracking",
+            fontSize = if (compact) 14.sp else 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun BlackoutButton(
+    compact: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .height(if (compact) 44.dp else 58.dp)
+            .tvFocus(shape),
+        shape = shape,
+        border = BorderStroke(1.dp, LumaBeatColor.Border),
+    ) {
+        Text("Black screen", fontSize = if (compact) 12.sp else 14.sp, maxLines = 1)
     }
 }
 
