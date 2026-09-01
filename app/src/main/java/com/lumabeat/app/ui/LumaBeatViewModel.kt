@@ -32,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,6 +74,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         .toMutableSet()
     private var audioJob: Job? = null
     private var colorGradientJob: Job? = null
+    private var lightPowerMonitorJob: Job? = null
     private var updateJob: Job? = null
     // Lighting state is real-time: if the network stalls, keep the newest target
     // instead of replaying an obsolete queue of peaks and releases later.
@@ -115,6 +117,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
 
     fun discoverLights() {
         if (state.value.isDiscovering) return
+        lightPowerMonitorJob?.cancel()
         viewModelScope.launch {
             mutableState.update { it.copy(isDiscovering = true, message = null) }
             runCatching { controller.discover() }
@@ -126,6 +129,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                             message = error.message ?: "The local network could not be scanned.",
                         )
                     }
+                    if (state.value.lights.isNotEmpty()) startLightPowerMonitor()
                 }
         }
     }
@@ -145,6 +149,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setLightIncluded(light: WizLight, included: Boolean) {
+        if (light.isOn != true) return
         val key = light.stableKey()
         if (included) excludedLightKeys.remove(key) else excludedLightKeys.add(key)
         preferences.edit().putStringSet(EXCLUDED_LIGHTS_KEY, excludedLightKeys.toSet()).apply()
@@ -418,6 +423,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         brightnessCommands.close()
+        lightPowerMonitorJob?.cancel()
         controller.close()
         PlaybackCaptureService.stop(getApplication())
         super.onCleared()
@@ -482,6 +488,25 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 },
             )
         }
+        startLightPowerMonitor()
+    }
+
+    private fun startLightPowerMonitor() {
+        lightPowerMonitorJob?.cancel()
+        lightPowerMonitorJob = viewModelScope.launch {
+            while (isActive) {
+                delay(LIGHT_POWER_POLL_MILLIS)
+                val currentLights = state.value.lights
+                if (currentLights.isEmpty()) continue
+                runCatching { controller.refreshPowerStates(currentLights) }
+                    .onSuccess { refreshed ->
+                        mutableState.update { current -> current.copy(lights = refreshed) }
+                    }
+                    .onFailure { error ->
+                        Log.w(LIGHT_LOG_TAG, "Could not refresh WiZ power states.", error)
+                    }
+            }
+        }
     }
 
     private fun showAudioError(error: Throwable) {
@@ -496,7 +521,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun participatingLights(): List<WizLight> = state.value.lights.filter { light ->
-        light.stableKey() in state.value.includedLightKeys
+        light.isOn == true && light.stableKey() in state.value.includedLightKeys
     }
 
     private fun startMediaColorGradient() {
@@ -583,6 +608,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         const val AUDIO_LOG_TAG = "LumaBeatAudio"
         const val PULSE_LOG_TAG = "LumaBeatPulse"
         const val COLOR_LOG_TAG = "LumaBeatColor"
+        const val LIGHT_LOG_TAG = "LumaBeatLights"
         const val PREFERENCES_NAME = "lumabeat_preferences"
         const val PRESET_KEY = "beat_preset"
         const val EXCLUDED_LIGHTS_KEY = "excluded_light_keys"
@@ -593,6 +619,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         const val AUTOMATIC_UPDATES_KEY = "automatic_update_checks"
         const val COLOR_GRADIENT_SEGMENT_MILLIS = 5_000L
         const val COLOR_GRADIENT_FRAME_MILLIS = 120L
+        const val LIGHT_POWER_POLL_MILLIS = 2_000L
     }
 }
 

@@ -33,6 +33,11 @@ class WizLanController(context: Context) {
             }
         }
 
+    suspend fun refreshPowerStates(lights: List<WizLight>): List<WizLight> =
+        withContext(Dispatchers.IO) {
+            lights.map { light -> light.copy(isOn = queryPowerState(light)) }
+        }
+
     suspend fun setPower(lights: List<WizLight>, enabled: Boolean) =
         sendToAll(lights) {
             JSONObject()
@@ -47,7 +52,6 @@ class WizLanController(context: Context) {
                 .put(
                     "params",
                     JSONObject()
-                        .put("state", true)
                         .put("dimming", brightnessPercent.coerceIn(10, 100)),
                 )
         }
@@ -61,7 +65,6 @@ class WizLanController(context: Context) {
             .put(
                 "params",
                 JSONObject()
-                    .put("state", true)
                     .put("r", color.red.coerceIn(0, 255))
                     .put("g", color.green.coerceIn(0, 255))
                     .put("b", color.blue.coerceIn(0, 255)),
@@ -78,7 +81,6 @@ class WizLanController(context: Context) {
             .put(
                 "params",
                 JSONObject()
-                    .put("state", true)
                     .put("temp", temperatureKelvin.coerceIn(2_200, 6_500))
                     .put("dimming", brightnessPercent.coerceIn(10, 100)),
             )

@@ -15,8 +15,9 @@ LumaBeat listens to the device output mix, detects percussion with low latency, 
 - Discovers compatible WiZ lights over the local network.
 - Sends low-latency brightness pulses without changing white temperature by default.
 - Offers Soft, Punchy, and Intense percussion profiles.
-- Lets each discovered light opt in or out of dynamic changes.
-- Uses an Android TV dashboard with D-pad focus, direct artwork controls, and native internal settings pages.
+- Lets each powered-on light opt in or out of dynamic changes. Powered-off lights remain visible but unavailable and automatically resume their saved participation state when switched on.
+- Uses a logo-derived dark neon design system, a scroll-free 16:9 Android TV dashboard, high-contrast D-pad focus, direct artwork controls, and native internal settings pages.
+- Provides a Black screen action while tracking. It keeps audio analysis and the foreground service running, lowers the application window brightness, hides system bars, and returns on any key press or tap.
 - Optionally reads active media artwork through Android notification access, extracts up to three distinct dominant colors locally, displays the live palette, and blends smoothly between them while beat tracking remains active.
 - Checks verified GitHub Releases, downloads with Android `DownloadManager`, and validates the SHA-256 digest, package identity, version, and signing certificate before opening the system installer.
 
@@ -46,6 +47,12 @@ When enabled from the main dashboard, LumaBeat asks Android for notification-lis
 The live palette is shown on the dashboard with its RGB hex values. Natural intensity preserves the sampled artwork colors, while Vivid and Bold increase saturation without increasing their peak RGB channel. A low-frequency color loop continuously blends through the resulting palette and across track changes while the percussion detector controls only brightness.
 
 No protected audio is extracted, stored, or decrypted. Artwork availability depends on what each media app publishes through Android's media session.
+
+## Black screen mode
+
+Black screen mode renders black pixels and requests the minimum application-window brightness while keeping LumaBeat awake and tracking in the foreground. Any remote key, Back, or touch exits the mode and restores the normal window brightness and system bars. It deliberately does not lock the device or place the TV in standby.
+
+Android does not expose a portable application API for switching off an LCD television's physical panel backlight while leaving playback and application processing active. On OLED displays, black pixels normally emit no light. On LCD televisions, the panel may still keep its backlight on at a firmware-defined level even though the image is black. Vendor-specific "picture off" or "audio only" controls are outside LumaBeat's current cross-device scope.
 
 ### Android TV firmware without Notification Access settings
 

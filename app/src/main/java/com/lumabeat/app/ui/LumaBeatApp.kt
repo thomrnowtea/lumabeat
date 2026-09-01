@@ -7,10 +7,15 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -41,12 +46,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -58,49 +61,48 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lumabeat.app.BuildConfig
+import com.lumabeat.app.R
 import com.lumabeat.app.audio.BeatPreset
 import com.lumabeat.app.media.ArtworkColorIntensity
 import com.lumabeat.app.update.AppUpdateStatus
 import com.lumabeat.app.update.UpdateFailure
 import com.lumabeat.app.wiz.WizLight
 
-private val BackgroundTop = Color(0xFF070A13)
-private val BackgroundBottom = Color(0xFF101123)
-private val Surface = Color(0xFF151829)
-private val SurfaceRaised = Color(0xFF22263A)
-private val Violet = Color(0xFF8A7CFF)
-private val VioletSoft = Color(0xFF302B61)
-private val Cyan = Color(0xFF72D7F7)
-private val Green = Color(0xFF65E6B5)
-private val TextPrimary = Color(0xFFF8F7FF)
-private val TextSecondary = Color(0xFFB3B4C8)
-private val FocusBorder = Color(0xFFE5E0FF)
-
-private val LumaBeatColors = darkColorScheme(
-    primary = Violet,
-    onPrimary = Color.White,
-    background = BackgroundTop,
-    onBackground = TextPrimary,
-    surface = Surface,
-    onSurface = TextPrimary,
-)
+private val BackgroundTop = LumaBeatColor.Canvas
+private val BackgroundBottom = LumaBeatColor.CanvasRaised
+private val Surface = LumaBeatColor.Surface
+private val SurfaceRaised = LumaBeatColor.SurfaceRaised
+private val Violet = LumaBeatColor.Accent
+private val VioletSoft = LumaBeatColor.AccentContainer
+private val Cyan = LumaBeatColor.Cyan
+private val Green = LumaBeatColor.Success
+private val TextPrimary = LumaBeatColor.TextPrimary
+private val TextSecondary = LumaBeatColor.TextSecondary
 
 private enum class AppPage {
     Dashboard,
@@ -112,7 +114,9 @@ private enum class AppPage {
 fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val activity = context as? Activity
     var autoStartHandled by rememberSaveable { mutableStateOf(false) }
+    var blackoutEnabled by rememberSaveable { mutableStateOf(false) }
     val audioPermission = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -121,12 +125,15 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     }
 
     LaunchedEffect(Unit) {
-        viewModel.discoverLights()
+        if (viewModel.state.value.lights.isEmpty()) viewModel.discoverLights()
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshNotificationAccess()
         viewModel.refreshInstallPermission()
+        if (state.keepScreenOnEnabled) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     LaunchedEffect(state.autoStartEnabled, state.isDiscovering, state.lights.size) {
@@ -145,7 +152,6 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
         }
     }
 
-    val activity = context as? Activity
     DisposableEffect(activity, state.keepScreenOnEnabled) {
         if (state.keepScreenOnEnabled) {
             activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -165,26 +171,75 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
             else -> audioPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
-
-    MaterialTheme(colorScheme = LumaBeatColors) {
-        LumaBeatScreen(
-            state = state,
-            onDiscover = viewModel::discoverLights,
-            onPresetSelected = viewModel::setBeatPreset,
-            onLightIncludedChange = viewModel::setLightIncluded,
-            onListeningToggle = toggleListening,
-            onAutoStartChange = viewModel::setAutoStartEnabled,
-            onKeepScreenOnChange = viewModel::setKeepScreenOnEnabled,
-            onMediaColorsChange = viewModel::setMediaColorsEnabled,
-            onArtworkColorIntensityChange = viewModel::setArtworkColorIntensity,
-            onOpenNotificationAccess = viewModel::openNotificationAccessSettings,
-            onAutomaticUpdatesChange = viewModel::setAutomaticUpdateChecks,
-            onCheckForUpdates = { viewModel.checkForUpdates() },
-            onDownloadUpdate = viewModel::downloadUpdate,
-            onInstallUpdate = viewModel::installUpdate,
-            onOpenInstallPermission = viewModel::openInstallPermissionSettings,
-        )
+    LumaBeatTheme {
+        if (blackoutEnabled) {
+            BlackoutScreen(activity = activity, onExit = { blackoutEnabled = false })
+        } else {
+            LumaBeatScreen(
+                state = state,
+                onDiscover = viewModel::discoverLights,
+                onPresetSelected = viewModel::setBeatPreset,
+                onLightIncludedChange = viewModel::setLightIncluded,
+                onListeningToggle = toggleListening,
+                onEnterBlackout = { blackoutEnabled = true },
+                onAutoStartChange = viewModel::setAutoStartEnabled,
+                onKeepScreenOnChange = viewModel::setKeepScreenOnEnabled,
+                onMediaColorsChange = viewModel::setMediaColorsEnabled,
+                onArtworkColorIntensityChange = viewModel::setArtworkColorIntensity,
+                onOpenNotificationAccess = viewModel::openNotificationAccessSettings,
+                onAutomaticUpdatesChange = viewModel::setAutomaticUpdateChecks,
+                onCheckForUpdates = { viewModel.checkForUpdates() },
+                onDownloadUpdate = viewModel::downloadUpdate,
+                onInstallUpdate = viewModel::installUpdate,
+                onOpenInstallPermission = viewModel::openInstallPermissionSettings,
+            )
+        }
     }
+}
+
+@Composable
+private fun BlackoutScreen(activity: Activity?, onExit: () -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    BackHandler(onBack = onExit)
+    DisposableEffect(activity) {
+        val window = activity?.window
+        val originalBrightness = window?.attributes?.screenBrightness
+        val wasKeepingScreenOn = window?.attributes?.flags
+            ?.and(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0
+        val systemBars = WindowInsetsCompat.Type.systemBars()
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window?.attributes = window?.attributes?.apply { screenBrightness = 0f }
+        val insetsController = window?.let { currentWindow ->
+            WindowCompat.getInsetsController(currentWindow, currentWindow.decorView)
+        }
+        insetsController?.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController?.hide(systemBars)
+        onDispose {
+            if (originalBrightness != null) {
+                window.attributes = window.attributes.apply { screenBrightness = originalBrightness }
+            }
+            insetsController?.show(systemBars)
+            if (!wasKeepingScreenOn) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    onExit()
+                    true
+                } else {
+                    false
+                }
+            }
+            .clickable(onClick = onExit),
+    )
 }
 
 @Composable
@@ -194,6 +249,7 @@ private fun LumaBeatScreen(
     onPresetSelected: (BeatPreset) -> Unit,
     onLightIncludedChange: (WizLight, Boolean) -> Unit,
     onListeningToggle: () -> Unit,
+    onEnterBlackout: () -> Unit,
     onAutoStartChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
     onMediaColorsChange: (Boolean) -> Unit,
@@ -214,7 +270,11 @@ private fun LumaBeatScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.linearGradient(listOf(BackgroundTop, BackgroundBottom))),
+            .background(
+                Brush.linearGradient(
+                    listOf(BackgroundTop, LumaBeatColor.CanvasGlow, BackgroundBottom),
+                ),
+            ),
     ) {
         val isTvLayout = maxWidth >= 700.dp && maxWidth > maxHeight
         when (currentPage) {
@@ -226,6 +286,7 @@ private fun LumaBeatScreen(
                     onPresetSelected = onPresetSelected,
                     onLightIncludedChange = onLightIncludedChange,
                     onListeningToggle = onListeningToggle,
+                    onEnterBlackout = onEnterBlackout,
                     onMediaColorsChange = onMediaColorsChange,
                     onArtworkColorIntensityChange = onArtworkColorIntensityChange,
                     onOpenNotificationAccess = onOpenNotificationAccess,
@@ -238,6 +299,7 @@ private fun LumaBeatScreen(
                     onPresetSelected = onPresetSelected,
                     onLightIncludedChange = onLightIncludedChange,
                     onListeningToggle = onListeningToggle,
+                    onEnterBlackout = onEnterBlackout,
                     onMediaColorsChange = onMediaColorsChange,
                     onArtworkColorIntensityChange = onArtworkColorIntensityChange,
                     onOpenNotificationAccess = onOpenNotificationAccess,
@@ -272,6 +334,7 @@ private fun TvDashboard(
     onPresetSelected: (BeatPreset) -> Unit,
     onLightIncludedChange: (WizLight, Boolean) -> Unit,
     onListeningToggle: () -> Unit,
+    onEnterBlackout: () -> Unit,
     onMediaColorsChange: (Boolean) -> Unit,
     onArtworkColorIntensityChange: (ArtworkColorIntensity) -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -305,6 +368,7 @@ private fun TvDashboard(
                     state = state,
                     compact = true,
                     onToggle = onListeningToggle,
+                    onEnterBlackout = onEnterBlackout,
                     modifier = Modifier.weight(1f),
                 )
                 PresetPanel(
@@ -346,6 +410,7 @@ private fun PhoneDashboard(
     onPresetSelected: (BeatPreset) -> Unit,
     onLightIncludedChange: (WizLight, Boolean) -> Unit,
     onListeningToggle: () -> Unit,
+    onEnterBlackout: () -> Unit,
     onMediaColorsChange: (Boolean) -> Unit,
     onArtworkColorIntensityChange: (ArtworkColorIntensity) -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -364,7 +429,12 @@ private fun PhoneDashboard(
             compact = false,
             onOpenSettings = onOpenSettings,
         )
-        ListeningCard(state, compact = false, onToggle = onListeningToggle)
+        ListeningCard(
+            state = state,
+            compact = false,
+            onToggle = onListeningToggle,
+            onEnterBlackout = onEnterBlackout,
+        )
         PresetPanel(state.beatPreset, compact = false, onPresetSelected)
         ArtworkColorsPanel(
             state = state,
@@ -392,15 +462,15 @@ private fun Header(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
+        Image(
+            painter = painterResource(R.drawable.lumabeat_logo),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(if (compact) 38.dp else 44.dp)
-                .clip(RoundedCornerShape(13.dp))
-                .background(Brush.linearGradient(listOf(Violet, Cyan))),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("L", color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp)
-        }
+                .size(if (compact) 40.dp else 48.dp)
+                .clip(RoundedCornerShape(LumaBeatRadius.Medium))
+                .border(1.dp, LumaBeatColor.Border, RoundedCornerShape(LumaBeatRadius.Medium)),
+        )
         Column(
             modifier = Modifier
                 .padding(start = 11.dp)
@@ -419,18 +489,17 @@ private fun Header(
         }
         StatusPill(state)
         Spacer(Modifier.width(8.dp))
-        Box {
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceRaised)
-                    .tvFocus(CircleShape)
-                    .semantics { contentDescription = "Open settings" },
-            ) {
-                Text("⋮", color = TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-            }
+        IconButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(SurfaceRaised)
+                .border(1.dp, LumaBeatColor.Border, CircleShape)
+                .tvFocus(CircleShape)
+                .semantics { contentDescription = "Open settings" },
+        ) {
+            Text("...", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -438,17 +507,25 @@ private fun Header(
 @Composable
 private fun StatusPill(state: LumaBeatUiState) {
     val active = state.isAudioReactive && state.signalPresent
+    val activeLights = state.activeLightCount()
     val label = when {
         active -> "Audio active"
         state.isAudioReactive -> "Waiting for audio"
-        state.lights.isNotEmpty() && state.includedLightKeys.isEmpty() -> "0 active"
-        state.lights.isNotEmpty() -> "Ready"
+        activeLights > 0 -> "$activeLights ready"
+        state.lights.any { it.isOn == false } -> "Lights off"
+        state.lights.isNotEmpty() -> "No lights selected"
         else -> "No lights"
+    }
+    val statusColor = when {
+        active -> Green
+        state.lights.any { it.isOn == false } && activeLights == 0 -> LumaBeatColor.Warning
+        else -> TextSecondary
     }
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(100.dp))
-            .background(if (active) Color(0xFF123B31) else SurfaceRaised)
+            .background(if (active) LumaBeatColor.SuccessContainer else SurfaceRaised)
+            .border(1.dp, LumaBeatColor.Border.copy(alpha = 0.8f), RoundedCornerShape(100.dp))
             .padding(horizontal = 13.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -457,9 +534,9 @@ private fun StatusPill(state: LumaBeatUiState) {
             modifier = Modifier
                 .size(7.dp)
                 .clip(CircleShape)
-                .background(if (active) Green else TextSecondary),
+                .background(statusColor),
         )
-        Text(label, color = if (active) Green else TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -468,11 +545,36 @@ private fun ListeningCard(
     state: LumaBeatUiState,
     compact: Boolean,
     onToggle: () -> Unit,
+    onEnterBlackout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val activeLightCount = state.activeLightCount()
+    val activeLightLabel = "$activeLightCount ${if (activeLightCount == 1) "light" else "lights"}"
+    val title = when {
+        state.isAudioReactive && state.signalPresent -> "Following the beat"
+        state.isAudioReactive -> "Listening for audio"
+        state.lights.isNotEmpty() && !state.hasActiveLights() -> "Turn on a selected light"
+        else -> "Ready to listen"
+    }
+    val subtitle = when {
+        state.isAudioReactive -> "${state.beatPreset.label} response · $activeLightLabel"
+        !state.hasActiveLights() -> "Available lights are required to start"
+        else -> "${state.beatPreset.label} percussion profile"
+    }
+    val trackingEnabled = state.isAudioReactive || state.hasActiveLights()
+    val primaryButtonBrush = when {
+        !trackingEnabled -> Brush.horizontalGradient(listOf(SurfaceRaised, SurfaceRaised))
+        state.isAudioReactive -> Brush.horizontalGradient(
+            listOf(LumaBeatColor.SurfaceInteractive, SurfaceRaised),
+        )
+        else -> Brush.horizontalGradient(
+            listOf(LumaBeatColor.AccentStrong, Violet, Cyan),
+        )
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(if (compact) 20.dp else 26.dp),
+        border = LumaBeatPanelBorder,
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
@@ -488,19 +590,23 @@ private fun ListeningCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (state.isAudioReactive) "Following the beat" else "Ready to listen",
+                        text = title,
                         color = TextPrimary,
                         fontSize = if (compact) 18.sp else 22.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Text("${state.beatPreset.label} profile", color = TextSecondary, fontSize = 12.sp)
+                    Text(subtitle, color = TextSecondary, fontSize = 12.sp)
                 }
                 Box(
                     modifier = Modifier
                         .size(if (compact) 48.dp else 68.dp)
                         .clip(CircleShape)
                         .background(Violet.copy(alpha = 0.16f + state.audioLevel * 0.34f))
-                        .border(2.dp, Violet.copy(alpha = 0.40f), CircleShape),
+                        .border(
+                            2.dp,
+                            Brush.sweepGradient(listOf(Violet, Cyan, Green, Violet)),
+                            CircleShape,
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -520,24 +626,51 @@ private fun ListeningCard(
                 color = if (state.signalPresent) Cyan else Violet,
                 trackColor = SurfaceRaised,
             )
-            Button(
-                onClick = onToggle,
-                enabled = state.isAudioReactive || state.includedLightKeys.isNotEmpty(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (compact) 44.dp else 58.dp)
-                    .tvFocus(RoundedCornerShape(14.dp)),
-                shape = RoundedCornerShape(14.dp),
-                colors = if (state.isAudioReactive) {
-                    ButtonDefaults.buttonColors(containerColor = SurfaceRaised)
-                } else {
-                    ButtonDefaults.buttonColors(containerColor = Violet)
-                },
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Button(
+                    onClick = onToggle,
+                    enabled = trackingEnabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(if (compact) 44.dp else 58.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(primaryButtonBrush)
+                        .tvFocus(RoundedCornerShape(14.dp)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        contentColor = Color.White,
+                        disabledContentColor = LumaBeatColor.TextMuted,
+                    ),
+                ) {
+                    Text(
+                        text = if (state.isAudioReactive) "Stop tracking" else "Start beat tracking",
+                        fontSize = if (compact) 14.sp else 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onEnterBlackout,
+                    enabled = state.isAudioReactive,
+                    modifier = Modifier
+                        .width(if (compact) 136.dp else 148.dp)
+                        .height(if (compact) 44.dp else 58.dp)
+                        .tvFocus(RoundedCornerShape(14.dp)),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, LumaBeatColor.Border),
+                ) {
+                    Text("Black screen", fontSize = if (compact) 12.sp else 14.sp)
+                }
+            }
+            if (!compact && state.isAudioReactive) {
                 Text(
-                    text = if (state.isAudioReactive) "Stop tracking" else "Start beat tracking",
-                    fontSize = if (compact) 14.sp else 16.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    "Beat tracking stays active. Press any key or tap to return.",
+                    color = LumaBeatColor.TextMuted,
+                    fontSize = 11.sp,
                 )
             }
         }
@@ -606,7 +739,7 @@ private fun PresetButton(
             containerColor = if (selected) VioletSoft else Surface,
             contentColor = TextPrimary,
         ),
-        border = ButtonDefaults.outlinedButtonBorder(selected),
+        border = BorderStroke(1.dp, if (selected) Violet else LumaBeatColor.Border),
     ) {
         if (compact) {
             Text(
@@ -642,6 +775,7 @@ private fun LightsPanel(
     Card(
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(if (compact) 20.dp else 24.dp),
+        border = LumaBeatPanelBorder,
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
@@ -656,10 +790,21 @@ private fun LightsPanel(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("WiZ lights", color = TextPrimary, fontSize = if (compact) 17.sp else 19.sp, fontWeight = FontWeight.SemiBold)
-                    Text("${state.includedLightKeys.size} of ${state.lights.size} follow the beat", color = TextSecondary, fontSize = 11.sp)
+                    Text("${state.activeLightCount()} of ${state.lights.size} follow the beat", color = TextSecondary, fontSize = 11.sp)
                 }
                 if (state.isDiscovering) {
                     CircularProgressIndicator(modifier = Modifier.size(19.dp), color = Violet, strokeWidth = 2.dp)
+                } else if (compact) {
+                    OutlinedButton(
+                        onClick = onDiscover,
+                        modifier = Modifier
+                            .height(38.dp)
+                            .tvFocus(RoundedCornerShape(LumaBeatRadius.Medium)),
+                        shape = RoundedCornerShape(LumaBeatRadius.Medium),
+                        contentPadding = PaddingValues(horizontal = LumaBeatSpace.Md),
+                    ) {
+                        Text(if (state.lights.isEmpty()) "Find" else "Refresh", fontSize = 11.sp)
+                    }
                 }
             }
             Spacer(Modifier.height(if (compact) 7.dp else 13.dp))
@@ -694,17 +839,19 @@ private fun LightsPanel(
                     Text(message, color = TextSecondary, fontSize = 12.sp)
                 }
             }
-            Spacer(Modifier.height(if (compact) 7.dp else 14.dp))
-            OutlinedButton(
-                onClick = onDiscover,
-                enabled = !state.isDiscovering,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(if (compact) 42.dp else 56.dp)
-                    .tvFocus(RoundedCornerShape(13.dp)),
-                shape = RoundedCornerShape(13.dp),
-            ) {
-                Text(if (state.lights.isEmpty()) "Find lights" else "Refresh lights")
+            if (!compact) {
+                Spacer(Modifier.height(14.dp))
+                OutlinedButton(
+                    onClick = onDiscover,
+                    enabled = !state.isDiscovering,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .tvFocus(RoundedCornerShape(13.dp)),
+                    shape = RoundedCornerShape(13.dp),
+                ) {
+                    Text(if (state.lights.isEmpty()) "Find lights" else "Refresh lights")
+                }
             }
         }
     }
@@ -728,14 +875,22 @@ private fun LightRow(
     compact: Boolean,
     onIncludedChange: (Boolean) -> Unit,
 ) {
+    val available = light.isOn == true
     val shape = RoundedCornerShape(14.dp)
+    val selectedColor = if (available && included) LumaBeatColor.SuccessContainer else SurfaceRaised
+    val rowColor by animateColorAsState(
+        targetValue = selectedColor,
+        animationSpec = tween(durationMillis = 180, easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)),
+        label = "light-availability-color",
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (included) Color(0xFF1B2C31) else SurfaceRaised.copy(alpha = 0.72f))
+            .background(rowColor)
+            .border(1.dp, LumaBeatColor.Border.copy(alpha = 0.6f), shape)
             .tvFocus(shape)
-            .clickable { onIncludedChange(!included) }
+            .clickable(enabled = available) { onIncludedChange(!included) }
             .padding(horizontal = 11.dp, vertical = if (compact) 5.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -743,10 +898,10 @@ private fun LightRow(
             modifier = Modifier
                 .size(if (compact) 30.dp else 38.dp)
                 .clip(CircleShape)
-                .background(if (included) Color(0xFF174838) else Surface),
+                .background(if (available && included) Color(0xFF1B4A3A) else Surface),
             contentAlignment = Alignment.Center,
         ) {
-            Text("●", color = if (included) Green else TextSecondary, fontSize = 14.sp)
+            Text("●", color = if (available) Green else TextSecondary, fontSize = 14.sp)
         }
         Column(
             modifier = Modifier
@@ -755,7 +910,12 @@ private fun LightRow(
         ) {
             Text(light.displayName, color = TextPrimary, fontSize = if (compact) 13.sp else 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Text(
-                text = if (included) "Included · ${light.ipAddress}" else "Excluded · ${light.ipAddress}",
+                text = when {
+                    light.isOn == false -> "Off · resumes when powered"
+                    light.isOn == null -> "Unavailable · waiting for device"
+                    included -> "Included · ${light.ipAddress}"
+                    else -> "Excluded · ${light.ipAddress}"
+                },
                 color = TextSecondary,
                 fontSize = if (compact) 10.sp else 12.sp,
                 maxLines = 1,
@@ -763,9 +923,16 @@ private fun LightRow(
         }
         Switch(
             checked = included,
+            enabled = available,
             onCheckedChange = null,
             modifier = Modifier
-                .semantics { contentDescription = "Include ${light.displayName} in dynamic changes" }
+                .semantics {
+                    contentDescription = if (available) {
+                        "Include ${light.displayName} in dynamic changes"
+                    } else {
+                        "${light.displayName} is off and unavailable"
+                    }
+                }
                 .graphicsLayer {
                     scaleX = if (compact) 0.78f else 0.9f
                     scaleY = if (compact) 0.78f else 0.9f
@@ -785,6 +952,7 @@ private fun ArtworkColorsPanel(
     Card(
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(if (compact) 20.dp else 24.dp),
+        border = LumaBeatPanelBorder,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -857,16 +1025,28 @@ private fun DetectedPalette(state: LumaBeatUiState, modifier: Modifier = Modifie
         if (state.mediaPalette.isEmpty()) {
             Text("Waiting for media artwork", color = TextSecondary, fontSize = 11.sp)
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(LumaBeatSpace.Sm),
+            ) {
                 state.mediaPalette.take(3).forEach { color ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
+                                .fillMaxWidth()
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(LumaBeatRadius.Small))
                                 .background(Color(color.red, color.green, color.blue))
-                                .border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape),
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.28f),
+                                    RoundedCornerShape(LumaBeatRadius.Small),
+                                ),
                         )
+                        Spacer(Modifier.height(3.dp))
                         Text(
                             "#%02X%02X%02X".format(color.red, color.green, color.blue),
                             color = TextSecondary,
@@ -932,7 +1112,7 @@ private fun SettingsScreen(
             .navigationBarsPadding()
             .padding(horizontal = if (compact) 28.dp else 20.dp, vertical = if (compact) 12.dp else 18.dp),
     ) {
-        InternalPageHeader("Settings", "Permanent playback and application preferences", onBack)
+        InternalPageHeader("Settings", "Playback, updates, and application preferences", onBack)
         Spacer(Modifier.height(if (compact) 16.dp else 20.dp))
         if (compact) {
             Row(
@@ -946,6 +1126,7 @@ private fun SettingsScreen(
                     onAutoStartChange = onAutoStartChange,
                     onKeepScreenOnChange = onKeepScreenOnChange,
                     modifier = Modifier.weight(1f),
+                    compact = true,
                 )
                 Column(
                     modifier = Modifier
@@ -960,8 +1141,14 @@ private fun SettingsScreen(
                         onDownloadUpdate = onDownloadUpdate,
                         onInstallUpdate = onInstallUpdate,
                         onOpenInstallPermission = onOpenInstallPermission,
+                        compact = true,
                     )
-                    SettingsNavigationRow("Licenses", "Open-source notices and application version", onOpenLicenses)
+                    SettingsNavigationRow(
+                        "Licenses",
+                        "Open-source notices and application version",
+                        onOpenLicenses,
+                        compact = true,
+                    )
                 }
             }
         } else {
@@ -1012,8 +1199,13 @@ private fun GeneralSettingsCard(
     onAutoStartChange: (Boolean) -> Unit,
     onKeepScreenOnChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
-    Card(modifier = modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface)) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Surface),
+        border = LumaBeatPanelBorder,
+    ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Playback", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             SettingSwitchRow(
@@ -1021,21 +1213,34 @@ private fun GeneralSettingsCard(
                 subtitle = "Start tracking after lights are found",
                 checked = state.autoStartEnabled,
                 onCheckedChange = onAutoStartChange,
+                compact = compact,
             )
             SettingSwitchRow(
                 title = "Keep screen awake",
-                subtitle = "Prevent Android TV from suspending LumaBeat",
+                subtitle = "Prevent the device from suspending LumaBeat",
                 checked = state.keepScreenOnEnabled,
                 onCheckedChange = onKeepScreenOnChange,
+                compact = compact,
             )
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = SurfaceRaised,
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                    Text("Device output mix", color = TextSecondary, fontSize = 12.sp)
+                if (compact) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        Text("Device output mix", color = TextSecondary, fontSize = 11.sp)
+                    }
+                } else {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text("Audio source", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text("Device output mix", color = TextSecondary, fontSize = 12.sp)
+                    }
                 }
             }
         }
@@ -1050,8 +1255,13 @@ private fun UpdateSettingsCard(
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
     onOpenInstallPermission: () -> Unit,
+    compact: Boolean = false,
 ) {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Surface)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Surface),
+        border = LumaBeatPanelBorder,
+    ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Application", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             SettingSwitchRow(
@@ -1059,6 +1269,7 @@ private fun UpdateSettingsCard(
                 subtitle = "Check verified GitHub Releases at startup",
                 checked = state.automaticUpdateChecks,
                 onCheckedChange = onAutomaticUpdatesChange,
+                compact = compact,
             )
             UpdatePanel(
                 status = state.appUpdateStatus,
@@ -1072,7 +1283,12 @@ private fun UpdateSettingsCard(
 }
 
 @Composable
-private fun SettingsNavigationRow(title: String, subtitle: String, onClick: () -> Unit) {
+private fun SettingsNavigationRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    compact: Boolean = false,
+) {
     val shape = RoundedCornerShape(18.dp)
     Row(
         modifier = Modifier
@@ -1081,12 +1297,12 @@ private fun SettingsNavigationRow(title: String, subtitle: String, onClick: () -
             .background(Surface)
             .tvFocus(shape)
             .clickable(onClick = onClick)
-            .padding(18.dp),
+            .padding(if (compact) 12.dp else 18.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+            Text(subtitle, color = TextSecondary, fontSize = if (compact) 11.sp else 12.sp, maxLines = 1)
         }
         Text(">", color = Violet, fontSize = 22.sp)
     }
@@ -1219,6 +1435,7 @@ private fun SettingSwitchRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    compact: Boolean = false,
 ) {
     val shape = RoundedCornerShape(16.dp)
     Row(
@@ -1228,12 +1445,12 @@ private fun SettingSwitchRow(
             .background(SurfaceRaised)
             .tvFocus(shape)
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = if (compact) 14.dp else 16.dp, vertical = if (compact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = TextPrimary, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+            Text(subtitle, color = TextSecondary, fontSize = if (compact) 11.sp else 12.sp, maxLines = 1)
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = null)
@@ -1255,6 +1472,7 @@ private fun LicensesScreen(compact: Boolean, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Surface),
             shape = RoundedCornerShape(22.dp),
+            border = LumaBeatPanelBorder,
         ) {
             Column(
                 modifier = Modifier
@@ -1280,17 +1498,10 @@ private fun LicensesScreen(compact: Boolean, onBack: () -> Unit) {
     }
 }
 
-@Composable
-private fun Modifier.tvFocus(shape: Shape): Modifier {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(targetValue = if (focused) 1.025f else 1f, label = "tv-focus-scale")
-    return this
-        .onFocusChanged { focused = it.isFocused }
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        }
-        .then(if (focused) Modifier.border(2.dp, FocusBorder, shape) else Modifier)
+private fun WizLight.stableKey(): String = macAddress.ifBlank { ipAddress }
+
+internal fun LumaBeatUiState.activeLightCount(): Int = lights.count { light ->
+    light.isOn == true && light.stableKey() in includedLightKeys
 }
 
-private fun WizLight.stableKey(): String = macAddress.ifBlank { ipAddress }
+private fun LumaBeatUiState.hasActiveLights(): Boolean = activeLightCount() > 0
