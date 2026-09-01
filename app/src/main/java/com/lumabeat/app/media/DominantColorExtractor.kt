@@ -6,14 +6,22 @@ import kotlin.math.max
 import kotlin.math.min
 
 object DominantColorExtractor {
-    fun extract(pixels: IntArray, maximumColors: Int = 3): List<LightColor> {
+    fun extract(
+        pixels: IntArray,
+        maximumColors: Int = 3,
+        fallbackToWhite: Boolean = true,
+    ): List<LightColor> {
         if (pixels.isEmpty() || maximumColors <= 0) return emptyList()
         val colorLimit = maximumColors.coerceAtMost(MAX_COLORS)
         val samples = collectSamples(pixels)
         val candidates = samples.buckets.values
             .sortedByDescending(Bucket::score)
             .map(Bucket::averageColor)
-        return selectDistinctColors(candidates, colorLimit, samples.hasOpaqueArtwork)
+        return selectDistinctColors(
+            candidates = candidates,
+            colorLimit = colorLimit,
+            useWhiteFallback = samples.hasOpaqueArtwork && fallbackToWhite,
+        )
     }
 
     private fun collectSamples(pixels: IntArray): SampleCollection {
@@ -48,7 +56,7 @@ object DominantColorExtractor {
     private fun selectDistinctColors(
         candidates: List<LightColor>,
         colorLimit: Int,
-        hasOpaqueArtwork: Boolean,
+        useWhiteFallback: Boolean,
     ): List<LightColor> {
         val selected = mutableListOf<LightColor>()
         candidates.forEach { candidate ->
@@ -58,7 +66,7 @@ object DominantColorExtractor {
             if (selected.size == colorLimit) return selected
         }
         return selected.ifEmpty {
-            if (hasOpaqueArtwork) listOf(NEUTRAL_WHITE) else emptyList()
+            if (useWhiteFallback) listOf(NEUTRAL_WHITE) else emptyList()
         }
     }
 

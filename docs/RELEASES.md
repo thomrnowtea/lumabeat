@@ -14,7 +14,7 @@ Every push to `main` and every pull request runs unit tests, Android lint, and d
 
 Each release publishes `LumaBeat.apk`, `LumaBeat.apk.sha256`, and schema-v1 `release.json`.
 
-The public APK is the `core` distribution. It uses Android's explicit playback-capture consent and deliberately omits notification-listener access so direct installs are not classified as sensitive notification-access sideloads. The `full` source variant retains the experimental artwork-color integration but is not published as a GitHub APK.
+The public APK is the `core` distribution. It uses Android's explicit media-projection consent for playback audio and visible player colors, and deliberately omits notification-listener access so direct installs are not classified as sensitive notification-access sideloads. The `full` source variant retains the experimental notification-based artwork integration but is not published as a GitHub APK.
 
 ## Signing
 

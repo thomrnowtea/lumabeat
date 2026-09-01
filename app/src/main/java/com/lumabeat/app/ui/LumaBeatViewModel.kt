@@ -88,7 +88,8 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
             mediaColorsEnabled = BuildConfig.ARTWORK_COLORS_AVAILABLE &&
                 preferences.getBoolean(MEDIA_COLORS_KEY, false),
             artworkColorIntensity = initialArtworkColorIntensity,
-            notificationAccessGranted = BuildConfig.ARTWORK_COLORS_AVAILABLE && hasNotificationAccess(),
+            notificationAccessGranted = BuildConfig.ARTWORK_COLORS_AVAILABLE &&
+                (!BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE || hasNotificationAccess()),
             automaticUpdateChecks = preferences.getBoolean(AUTOMATIC_UPDATES_KEY, true),
         ),
     )
@@ -194,12 +195,14 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 mediaColorsEnabled = enabled,
                 message = when {
                     !enabled -> "Artwork colors disabled."
+                    BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
+                        "Player colors will update from the visible screen while tracking."
                     it.notificationAccessGranted -> "Artwork colors enabled."
                     else -> "Allow notification access to read media artwork."
                 },
             )
         }
-        if (enabled && hasNotificationAccess()) {
+        if (enabled && BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE && hasNotificationAccess()) {
             NotificationListenerService.requestRebind(
                 ComponentName(getApplication(), MediaNotificationListenerService::class.java),
             )
@@ -218,7 +221,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun openNotificationAccessSettings() {
-        if (!BuildConfig.ARTWORK_COLORS_AVAILABLE) return
+        if (!BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE) return
         val application = getApplication<Application>()
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -238,7 +241,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
         mutableState.update {
             it.copy(
                 notificationAccessGranted = BuildConfig.ARTWORK_COLORS_AVAILABLE &&
-                    hasNotificationAccess(),
+                    (!BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE || hasNotificationAccess()),
             )
         }
     }
@@ -452,7 +455,12 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     private suspend fun collectAudioLevels(projectionResultCode: Int, projectionData: Intent) {
         var lastBeatMillis = 0L
         var releaseSent = true
-        audioLevelAnalyzer.levels(projectionResultCode, projectionData) { state.value.beatPreset }
+        audioLevelAnalyzer.levels(
+            projectionResultCode = projectionResultCode,
+            projectionData = projectionData,
+            presetProvider = { state.value.beatPreset },
+            screenColorsEnabledProvider = { state.value.mediaColorsEnabled },
+        )
             .catch { error -> showAudioError(error) }
             .collect { level ->
                 mutableState.update {
@@ -589,7 +597,7 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun hasNotificationAccess(): Boolean {
-        if (!BuildConfig.ARTWORK_COLORS_AVAILABLE) return false
+        if (!BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE) return false
         return NotificationManagerCompat
             .getEnabledListenerPackages(getApplication())
             .contains(getApplication<Application>().packageName)

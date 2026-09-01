@@ -3,7 +3,9 @@ package com.lumabeat.app.ui
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -117,40 +119,8 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = context as? Activity
-    var autoStartHandled by rememberSaveable { mutableStateOf(false) }
     var blackoutEnabled by rememberSaveable { mutableStateOf(false) }
-    val mediaProjectionManager = remember(context) {
-        context.getSystemService(MediaProjectionManager::class.java)
-    }
-    val playbackCapturePermission = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val projectionData = result.data
-        if (result.resultCode == Activity.RESULT_OK && projectionData != null) {
-            viewModel.startAudioReactiveBrightness(result.resultCode, projectionData)
-        } else {
-            viewModel.audioCapturePermissionDenied()
-        }
-    }
-    val requestPlaybackCapture = {
-        playbackCapturePermission.launch(mediaProjectionManager.createScreenCaptureIntent())
-    }
-    val audioPermission = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted) requestPlaybackCapture()
-        else viewModel.audioPermissionDenied()
-    }
-    val requestAudioCapture = {
-        if (
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPlaybackCapture()
-        } else {
-            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
+    val requestAudioCapture = rememberAudioCaptureRequest(viewModel)
 
     LaunchedEffect(Unit) {
         if (viewModel.state.value.lights.isEmpty()) viewModel.discoverLights()
@@ -159,30 +129,10 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshNotificationAccess()
         viewModel.refreshInstallPermission()
-        if (state.keepScreenOnEnabled) {
-            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
     }
 
-    LaunchedEffect(state.autoStartEnabled, state.isDiscovering, state.lights.size) {
-        if (!state.autoStartEnabled) {
-            autoStartHandled = false
-        } else if (!autoStartHandled && !state.isDiscovering && state.lights.isNotEmpty()) {
-            autoStartHandled = true
-            requestAudioCapture()
-        }
-    }
-
-    DisposableEffect(activity, state.keepScreenOnEnabled) {
-        if (state.keepScreenOnEnabled) {
-            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-        onDispose {
-            if (state.keepScreenOnEnabled) {
-                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        }
-    }
+    AutoStartEffect(state, requestAudioCapture)
+    KeepScreenAwakeEffect(activity, state.keepScreenOnEnabled)
 
     val toggleListening = {
         when {
@@ -212,6 +162,76 @@ fun LumaBeatApp(viewModel: LumaBeatViewModel = viewModel()) {
                 onInstallUpdate = viewModel::installUpdate,
                 onOpenInstallPermission = viewModel::openInstallPermissionSettings,
             )
+        }
+    }
+}
+
+@Composable
+private fun rememberAudioCaptureRequest(viewModel: LumaBeatViewModel): () -> Unit {
+    val context = LocalContext.current
+    val mediaProjectionManager = remember(context) {
+        context.getSystemService(MediaProjectionManager::class.java)
+    }
+    val playbackCapturePermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val projectionData = result.data
+        if (result.resultCode == Activity.RESULT_OK && projectionData != null) {
+            viewModel.startAudioReactiveBrightness(result.resultCode, projectionData)
+        } else {
+            viewModel.audioCapturePermissionDenied()
+        }
+    }
+    val requestPlaybackCapture = {
+        val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            mediaProjectionManager.createScreenCaptureIntent(
+                MediaProjectionConfig.createConfigForDefaultDisplay(),
+            )
+        } else {
+            mediaProjectionManager.createScreenCaptureIntent()
+        }
+        playbackCapturePermission.launch(captureIntent)
+    }
+    val audioPermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) requestPlaybackCapture() else viewModel.audioPermissionDenied()
+    }
+    return {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPlaybackCapture()
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+}
+
+@Composable
+private fun AutoStartEffect(state: LumaBeatUiState, requestAudioCapture: () -> Unit) {
+    var handled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.autoStartEnabled, state.isDiscovering, state.lights.size) {
+        if (!state.autoStartEnabled) {
+            handled = false
+        } else if (!handled && !state.isDiscovering && state.lights.isNotEmpty()) {
+            handled = true
+            requestAudioCapture()
+        }
+    }
+}
+
+@Composable
+private fun KeepScreenAwakeEffect(activity: Activity?, enabled: Boolean) {
+    DisposableEffect(activity, enabled) {
+        if (enabled) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            if (enabled) {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
         }
     }
 }
@@ -1131,7 +1151,14 @@ private fun ArtworkColorsPanel(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (state.mediaColorsEnabled) "Smooth gradient active" else "Use the current media artwork",
+                        when {
+                            state.mediaColorsEnabled && BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
+                                "Sampling the visible player while tracking"
+                            state.mediaColorsEnabled -> "Smooth gradient active"
+                            BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
+                                "Use visible Spotify or YouTube artwork"
+                            else -> "Use the current media artwork"
+                        },
                         color = TextSecondary,
                         fontSize = 11.sp,
                     )
@@ -1156,7 +1183,10 @@ private fun ArtworkColorsPanel(
                     DetectedPalette(state)
                     IntensitySelector(state.artworkColorIntensity, onIntensityChange)
                 }
-                if (!state.notificationAccessGranted) {
+                if (
+                    BuildConfig.NOTIFICATION_ARTWORK_AVAILABLE &&
+                    !state.notificationAccessGranted
+                ) {
                     OutlinedButton(
                         onClick = onOpenNotificationAccess,
                         modifier = Modifier
@@ -1183,7 +1213,15 @@ private fun DetectedPalette(state: LumaBeatUiState, modifier: Modifier = Modifie
         )
         Spacer(Modifier.height(5.dp))
         if (state.mediaPalette.isEmpty()) {
-            Text("Waiting for media artwork", color = TextSecondary, fontSize = 11.sp)
+            Text(
+                if (BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE) {
+                    "Waiting for visible player artwork"
+                } else {
+                    "Waiting for media artwork"
+                },
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),

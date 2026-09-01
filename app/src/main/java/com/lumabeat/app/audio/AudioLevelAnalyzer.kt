@@ -12,6 +12,12 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
+import com.lumabeat.app.BuildConfig
+import com.lumabeat.app.media.MediaColorRepository
+import com.lumabeat.app.media.ScreenColorSampler
+import com.lumabeat.app.wiz.LightColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +43,7 @@ class AudioLevelAnalyzer(private val context: Context) {
         projectionResultCode: Int,
         projectionData: Intent,
         presetProvider: () -> BeatPreset,
+        screenColorsEnabledProvider: () -> Boolean,
     ): Flow<AudioLevel> = flow {
         check(projectionResultCode == Activity.RESULT_OK) {
             "System audio sharing was not approved."
@@ -47,6 +54,7 @@ class AudioLevelAnalyzer(private val context: Context) {
         ) { "Android did not provide playback audio capture access." }
         val projectionActive = AtomicBoolean(true)
         var recorder: AudioRecord? = null
+        var screenColorSampler: ScreenColorSampler? = null
         val projectionCallback = object : MediaProjection.Callback() {
             override fun onStop() {
                 projectionActive.set(false)
@@ -55,6 +63,13 @@ class AudioLevelAnalyzer(private val context: Context) {
         }
         try {
             projection.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
+            if (BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE) {
+                runCatching { ScreenColorSampler(context, projection) }
+                    .onSuccess { screenColorSampler = it }
+                    .onFailure { error ->
+                        Log.w(SCREEN_COLOR_LOG_TAG, "Visible player colors are unavailable.", error)
+                    }
+            }
             val captureConfiguration = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -84,6 +99,8 @@ class AudioLevelAnalyzer(private val context: Context) {
 
             val samples = ShortArray(CAPTURE_SAMPLES)
             val detector = PercussionDetector(presetProvider)
+            var nextScreenSampleMillis = SystemClock.elapsedRealtime() + SCREEN_SAMPLE_INITIAL_DELAY_MS
+            var lastScreenPalette = emptyList<LightColor>()
             audioRecord.startRecording()
             check(audioRecord.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                 "Android did not start playback audio capture."
@@ -110,10 +127,20 @@ class AudioLevelAnalyzer(private val context: Context) {
                         inputRms = inputRms,
                     ),
                 )
+                val now = SystemClock.elapsedRealtime()
+                if (
+                    screenColorSampler != null &&
+                    screenColorsEnabledProvider() &&
+                    now >= nextScreenSampleMillis
+                ) {
+                    lastScreenPalette = publishScreenPalette(screenColorSampler, lastScreenPalette)
+                    nextScreenSampleMillis = now + SCREEN_SAMPLE_INTERVAL_MS
+                }
             }
         } finally {
             runCatching { recorder?.stop() }
             recorder?.release()
+            runCatching { screenColorSampler?.close() }
             runCatching { projection.unregisterCallback(projectionCallback) }
             runCatching { projection.stop() }
         }
@@ -128,9 +155,29 @@ class AudioLevelAnalyzer(private val context: Context) {
         return sqrt(sumSquares / sampleCount).toFloat()
     }
 
+    private fun publishScreenPalette(
+        sampler: ScreenColorSampler?,
+        previousPalette: List<LightColor>,
+    ): List<LightColor> = runCatching {
+        sampler?.sample().orEmpty()
+    }.onFailure { error ->
+        Log.w(SCREEN_COLOR_LOG_TAG, "Could not sample visible player colors.", error)
+    }.getOrDefault(emptyList()).let { colors ->
+        if (colors.isNotEmpty() && colors != previousPalette) {
+            MediaColorRepository.publish(colors)
+            Log.i(SCREEN_COLOR_LOG_TAG, "Published visible player palette: $colors")
+            colors
+        } else {
+            previousPalette
+        }
+    }
+
     private companion object {
         const val SAMPLE_RATE = 44_100
         const val CAPTURE_SAMPLES = 1_024
         const val SIGNAL_THRESHOLD_RMS = 0.001f
+        const val SCREEN_SAMPLE_INITIAL_DELAY_MS = 2_500L
+        const val SCREEN_SAMPLE_INTERVAL_MS = 1_800L
+        const val SCREEN_COLOR_LOG_TAG = "LumaBeatScreenColors"
     }
 }

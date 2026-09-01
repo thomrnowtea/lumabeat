@@ -54,6 +54,19 @@ class DominantColorExtractorTest {
     }
 
     @Test
+    fun `does not replace the last screen palette with a black frame`() {
+        val pixels = intArrayOf(
+            argb(0, 0, 0),
+            argb(20, 20, 20),
+            argb(130, 130, 130),
+        )
+
+        assertTrue(
+            DominantColorExtractor.extract(pixels, fallbackToWhite = false).isEmpty(),
+        )
+    }
+
+    @Test
     fun `returns no color for fully transparent artwork`() {
         val pixels = intArrayOf(0x0044AAFF)
 
