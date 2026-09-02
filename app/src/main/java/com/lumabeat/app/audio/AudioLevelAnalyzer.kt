@@ -161,11 +161,11 @@ class AudioLevelAnalyzer(private val context: Context) {
     ): List<LightColor> = runCatching {
         sampler?.sample().orEmpty()
     }.onFailure { error ->
-        Log.w(SCREEN_COLOR_LOG_TAG, "Could not sample visible player colors.", error)
+        Log.w(SCREEN_COLOR_LOG_TAG, "Could not sample projected player colors.", error)
     }.getOrDefault(emptyList()).let { colors ->
         if (colors.isNotEmpty() && colors != previousPalette) {
             MediaColorRepository.publish(colors)
-            Log.i(SCREEN_COLOR_LOG_TAG, "Published visible player palette: $colors")
+            Log.i(SCREEN_COLOR_LOG_TAG, "Published projected player palette: $colors")
             colors
         } else {
             previousPalette

@@ -4,13 +4,19 @@ All notable changes to LumaBeat are documented here.
 
 ## Unreleased
 
+## 0.1.4 - 2026-09-01
+
+- Let users on devices with Android's app-sharing picker select Spotify, YouTube, or another player as the projection source instead of forcing capture of the complete display.
+- Keep Core artwork sampling scoped to the selected player while LumaBeat or Black screen mode is visible.
+- Explain the system sharing choice in the dashboard and document the whole-screen fallback on devices without per-app sharing.
+
 ## 0.1.3 - 2026-09-01
 
 - Restore artwork-driven light colors in the public Core APK without notification-listener access.
 - Sample the visible Spotify, YouTube, or other player screen locally through the already approved MediaProjection session.
 - Continue extracting up to three distinct colors, preserving white while excluding black and gray from the rotating palette.
 - Keep the last valid palette when the player, protected content, or LumaBeat's Black screen mode produces a black frame.
-- Restrict Android 14 and newer capture consent to the complete default display so colors can follow the player after leaving LumaBeat.
+- Restrict Android 14 and newer capture consent to the complete default display. This was replaced in 0.1.4 because it sampled whichever app was in front.
 - Keep captured frames in memory only at a reduced resolution; no screenshot is stored or uploaded.
 
 ## 0.1.2 - 2026-09-01

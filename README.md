@@ -16,7 +16,7 @@ LumaBeat listens to playback audio that Android explicitly shares, detects percu
 - Sends low-latency brightness pulses without changing white temperature by default.
 - Offers Soft, Punchy, and Intense percussion profiles.
 - Lets each powered-on light opt in or out of dynamic changes. Powered-off lights remain visible but unavailable and automatically resume their saved participation state when switched on.
-- Optionally extracts up to three colors from visible Spotify, YouTube, or other player artwork and blends smoothly between them without notification access.
+- Optionally extracts up to three colors from Spotify, YouTube, or another selected player and blends smoothly between them without notification access. Devices with Android's app-sharing picker can keep the capture scoped to that player while LumaBeat is in front.
 - Uses a logo-derived dark neon design system, a scroll-free 16:9 Android TV dashboard, high-contrast D-pad focus, and native internal settings pages.
 - Provides a Black screen action while tracking. It keeps audio analysis and the foreground service running, lowers the application window brightness, hides system bars, and returns on any key press or tap.
 - Checks verified GitHub Releases, downloads with Android `DownloadManager`, and validates the SHA-256 digest, package identity, version, and signing certificate before opening the system installer.
@@ -55,7 +55,11 @@ The source tree also contains an experimental **Full** flavor that reads media-s
 
 ## How artwork colors work in Core
 
-When artwork colors are enabled, LumaBeat creates one low-resolution virtual display inside the MediaProjection session that Android has explicitly approved. While tracking, it samples the visible player screen approximately every two seconds and extracts up to three genuinely distinct dominant colors locally. Return to the Spotify, YouTube, or other Now Playing screen after starting LumaBeat so its artwork is visible to the approved capture.
+When artwork colors are enabled, LumaBeat creates one low-resolution virtual display inside the MediaProjection session that Android has explicitly approved. While tracking, it samples that projection approximately every two seconds and extracts up to three genuinely distinct dominant colors locally.
+
+On devices that offer Android app screen sharing (Android 14 QPR2 and newer, subject to device support), choose **A single app** (the wording can vary by device) and then Spotify, YouTube, or the desired player in Android's system-owned sharing dialog. The projection remains scoped to the selected player, so returning to LumaBeat or entering Black screen mode does not make the sampler read LumaBeat's own interface. Choosing **Entire screen** deliberately restores whole-screen behavior.
+
+Android 10 through 13—and Android 14 builds whose system dialog does not offer single-app sharing—can sample only the currently visible display. On those devices, the player's Now Playing screen must remain visible for artwork updates. Reading another app's artwork as background metadata requires notification-listener access or a player-specific authenticated integration; the public Core APK requests neither.
 
 Diversity is measured by hue as well as RGB distance, so light and dark variants from the same color family do not occupy separate palette slots. White is eligible; black and gray pixels are ignored because they would duplicate dimming. Black or protected frames do not overwrite the last valid palette.
 

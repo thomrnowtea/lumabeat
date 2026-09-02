@@ -3,6 +3,7 @@ package com.lumabeat.app.ui
 import android.app.Application
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -196,7 +197,11 @@ class LumaBeatViewModel(application: Application) : AndroidViewModel(application
                 message = when {
                     !enabled -> "Artwork colors disabled."
                     BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
-                        "Player colors will update from the visible screen while tracking."
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            "Start tracking, then select the player app if Android offers app sharing."
+                        } else {
+                            "Player colors update from the visible screen while tracking."
+                        }
                     it.notificationAccessGranted -> "Artwork colors enabled."
                     else -> "Allow notification access to read media artwork."
                 },

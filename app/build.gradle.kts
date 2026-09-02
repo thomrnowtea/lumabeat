@@ -14,8 +14,8 @@ android {
         applicationId = "com.lumabeat.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 5
-        versionName = providers.environmentVariable("VERSION_NAME").orNull ?: "0.1.3"
+        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 6
+        versionName = providers.environmentVariable("VERSION_NAME").orNull ?: "0.1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

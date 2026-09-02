@@ -185,7 +185,7 @@ private fun rememberAudioCaptureRequest(viewModel: LumaBeatViewModel): () -> Uni
     val requestPlaybackCapture = {
         val captureIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             mediaProjectionManager.createScreenCaptureIntent(
-                MediaProjectionConfig.createConfigForDefaultDisplay(),
+                MediaProjectionConfig.createConfigForUserChoice(),
             )
         } else {
             mediaProjectionManager.createScreenCaptureIntent()
@@ -1153,10 +1153,18 @@ private fun ArtworkColorsPanel(
                     Text(
                         when {
                             state.mediaColorsEnabled && BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
-                                "Sampling the visible player while tracking"
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    "Sampling the approved player or screen"
+                                } else {
+                                    "Sampling the visible player while tracking"
+                                }
                             state.mediaColorsEnabled -> "Smooth gradient active"
                             BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE ->
-                                "Use visible Spotify or YouTube artwork"
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    "Choose Spotify or YouTube if app sharing is offered"
+                                } else {
+                                    "Use visible Spotify or YouTube artwork"
+                                }
                             else -> "Use the current media artwork"
                         },
                         color = TextSecondary,
@@ -1215,7 +1223,11 @@ private fun DetectedPalette(state: LumaBeatUiState, modifier: Modifier = Modifie
         if (state.mediaPalette.isEmpty()) {
             Text(
                 if (BuildConfig.SCREEN_COLOR_CAPTURE_AVAILABLE) {
-                    "Waiting for visible player artwork"
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        "Waiting for artwork from the approved capture"
+                    } else {
+                        "Waiting for visible player artwork"
+                    }
                 } else {
                     "Waiting for media artwork"
                 },
